@@ -3,106 +3,120 @@ import requests
 import pandas as pd
 import time
 
-# 1. 页面极简配置 (强制宽屏+深色/浅色适配)
-st.set_page_config(page_title="破军·鹰眼系统", page_icon="🎯", layout="wide")
+# 1. 页面配置：极致简洁
+st.set_page_config(page_title="破军·鹰眼终端", page_icon="🦅", layout="wide")
 
-# 2. 注入高级 CSS 样式 (让界面变高级、变干净)
+# 2. 注入高级 CSS：优化列表显示与移动端间距
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; border: 1px solid #e9ecef; padding: 15px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    [data-testid="stMetricValue"] { font-size: 28px !important; font-weight: 700 !important; color: #1a1a1a; }
-    .status-box { padding: 12px; border-radius: 8px; margin: 10px 0; font-weight: 500; border-left: 5px solid; }
-    .buy-zone { background-color: #e6fffa; border-left-color: #38a169; color: #234e52; }
-    .risk-zone { background-color: #fff5f5; border-left-color: #e53e3e; color: #742a2a; }
-    .watch-zone { background-color: #ebf8ff; border-left-color: #3182ce; color: #2a4365; }
+    .stTable { background-color: white; border-radius: 10px; }
+    .stMetric { border: 1px solid #eee; padding: 10px; border-radius: 8px; }
+    .status-tag { padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+    .buy { background-color: #00fa9a; color: #006400; }
+    .risk { background-color: #ffcccb; color: #8b0000; }
+    .hold { background-color: #e0f7fa; color: #006064; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 侧边栏：鹰眼参数配置 ---
-with st.sidebar:
-    st.header("🎯 鹰眼策略参数")
-    user_stocks = st.text_input("监控代码 (逗号分隔)", "sh600519,sz000001,sz002594")
-    
-    st.subheader("📊 筹码逻辑")
-    chip_support = st.number_input("日线筹码支撑位 (跌幅%)", value=-3.0, step=0.5)
-    
-    st.subheader("🛡️ 风险控制")
-    stop_loss = st.number_input("绝对止损线 (跌幅%)", value=-5.5, step=0.1)
-    
-    st.info("💡 提示：修改参数后，右侧逻辑会自动重算。")
-
-# --- 核心函数：高速数据抓取 ---
-def get_data(codes):
-    url = f"http://qt.gtimg.cn/q={codes}"
+# --- 核心逻辑：数据抓取 ---
+def fetch_stock_data(codes):
+    if not codes: return []
+    url = f"http://qt.gtimg.cn/q={','.join(codes)}"
     try:
-        res = requests.get(url, timeout=3)
+        res = requests.get(url, timeout=5)
         res.encoding = 'gbk'
-        lines = res.text.strip().split(';')
         results = []
-        for line in lines:
+        for line in res.text.strip().split(';'):
             if '="' not in line: continue
             info = line.split('=')[1].strip('"').split('~')
             if len(info) > 38:
                 results.append({
-                    "name": info[1],
-                    "code": info[2],
-                    "price": float(info[3]),
-                    "change": float(info[32]),
-                    "volume": float(info[37]), # 万
-                    "turnover": float(info[38]) # 换手率
+                    "名称": info[1],
+                    "代码": info[2],
+                    "当前价": float(info[3]),
+                    "涨跌幅%": float(info[32]),
+                    "换手%": float(info[38]),
+                    "成交额(亿)": round(float(info[37])/10000, 2)
                 })
         return results
     except: return []
 
-# --- 主界面布局 ---
-st.title("🎯 破军·鹰眼分析终端")
-
-if user_stocks:
-    data = get_data(user_stocks)
+# --- 侧边栏：自选股池管理 ---
+with st.sidebar:
+    st.header("🦅 鹰眼池管理")
     
-    # 顶部关键指标：一行展示，突出重点
-    cols = st.columns(len(data))
-    for i, s in enumerate(data):
-        with cols[i]:
-            # A股习惯：涨红跌绿
-            color = "normal" if s['change'] >= 0 else "inverse"
-            st.metric(label=f"{s['name']}", value=f"¥{s['price']}", delta=f"{s['change']}%", delta_color=color)
+    # 预设几个默认股票，你可以直接删除并添加自己的
+    if 'my_watch_list' not in st.session_state:
+        st.session_state.my_watch_list = ["sh600519", "sz000001", "sz002594"]
+    
+    # 手动添加功能
+    new_code = st.text_input("➕ 输入新代码 (如 sh600000)", "").lower()
+    if st.button("添加到池子") and new_code:
+        if n := new_code.strip():
+            st.session_state.my_watch_list.append(n)
+            st.session_state.my_watch_list = list(set(st.session_state.my_watch_list)) # 去重
+            st.rerun()
 
+    if st.button("🗑️ 清空所有自选"):
+        st.session_state.my_watch_list = []
+        st.rerun()
+
+    st.divider()
+    st.subheader("⚙️ 逻辑阈值")
+    buy_limit = st.number_input("滚动买入触发(%)", value=-3.0, step=0.5)
+    risk_limit = st.number_input("止损警报触发(%)", value=-5.0, step=0.5)
+
+# --- 主界面 ---
+st.title("🦅 破军·鹰眼实时终端")
+
+if st.session_state.my_watch_list:
+    data = fetch_stock_data(st.session_state.my_watch_list)
+    df = pd.DataFrame(data)
+
+    # A. 顶部重点监控（展示涨跌最剧烈的几只）
+    st.subheader("🔥 重点波动监控")
+    top_cols = st.columns(min(len(data), 4))
+    for i, row in enumerate(data[:4]):
+        with top_cols[i]:
+            color = "normal" if row['涨跌幅%'] >= 0 else "inverse"
+            st.metric(row['名称'], f"¥{row['当前价']}", f"{row['涨跌幅%']}%", delta_color=color)
+
+    st.divider()
+
+    # B. 全量列表看板（表格形式，简洁干净）
+    st.subheader("📋 我的自选池清单")
+    
+    # 增加逻辑诊断列
+    def judge(x):
+        if x <= risk_limit: return "🛑 破位风控"
+        if x <= buy_limit: return "💰 滚动买入"
+        return "⚖️ 观望中"
+    
+    df['鹰眼诊断'] = df['涨跌幅%'].apply(judge)
+    
+    # 格式化表格显示
+    st.dataframe(
+        df, 
+        column_config={
+            "涨跌幅%": st.column_config.NumberColumn(format="%.2f%%"),
+            "当前价": st.column_config.NumberColumn(format="¥%.2f"),
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+
+    # C. 主力博弈简报
     st.markdown("---")
-    
-    # 下方：鹰眼逻辑推演区
-    st.subheader("🔍 鹰眼系统：主力博弈推演")
-    
-    for s in data:
-        change = s['change']
-        turnover = s['turnover']
-        
-        # 逻辑判断
-        if change <= stop_loss:
-            status_class = "risk-zone"
-            status_title = "🛑 风险预警：趋势破位"
-            logic_desc = f"当前跌幅 {change}% 已击穿止损线。换手率 {turnover}%。若缩量阴跌，主力可能已离场；若放量，则是恐慌盘涌出，需严格执行风控。"
-        elif change <= chip_support:
-            status_class = "buy-zone"
-            status_title = "💰 战略机会：筹码支撑区"
-            logic_desc = f"跌幅 {change}% 进入日线筹码密集区。符合‘仓位滚动法’。此位置主力反人性诱空概率大，建议分批分仓切入。"
-        else:
-            status_class = "watch-zone"
-            status_title = "⚖️ 动态观察：均衡博弈"
-            logic_desc = f"当前波动 {change}%，属于正常震荡区间。换手率 {turnover}% 正常，主力意图不显，建议持仓不动，等待参数触碰。"
-
-        # 渲染卡片
-        st.markdown(f"""
-            <div class="status-box {status_class}">
-                <div style="font-size: 18px; font-weight: bold;">{s['name']} | {status_title}</div>
-                <div style="margin-top: 8px; font-size: 14px; line-height: 1.6;">{logic_desc}</div>
-            </div>
-            """, unsafe_allow_html=True)
+    st.subheader("🧠 主力博弈逻辑推演")
+    for row in data:
+        if row['涨跌幅%'] <= buy_limit:
+            st.success(f"**{row['名称']}**: 股价进入反人性布局区（{row['涨跌幅%']}%）。换手率 {row['换手%']}%，观察是否有缩量止跌信号。")
+        elif row['涨跌幅%'] <= risk_limit:
+            st.error(f"**{row['名称']}**: 触发风险扫描。当前跌幅较大，需对比日线筹码图确认支撑是否失效。")
 
 else:
-    st.warning("👈 请在左侧输入股票代码。")
+    st.info("💡 你的鹰眼池还是空的，请在左侧边栏添加股票代码（如 sh600519）。")
 
-# 4. 自动刷新提示 (Streamlit Cloud 会自动处理重载，这里加个手动保底)
-if st.button("🔄 立即同步最新数据"):
+# 自动刷新
+if st.button("🔄 同步最新行情"):
     st.rerun()
