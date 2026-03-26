@@ -1,108 +1,111 @@
 import streamlit as st
 import requests
-import pandas as pd
 
-# ---------------------------------------------------------
-# 【核心配置区】在此处直接修改你永远想关注的股票代码
-# ---------------------------------------------------------
-MY_DEFAULT_STOCKS = "sh600519,sz000001,sz002594" # 你可以把这里改成你的持仓，如 "sh600000,sz000002"
-# ---------------------------------------------------------
+# 1. 页面极简配置
+st.set_page_config(page_title="行情监控", layout="wide")
 
-st.set_page_config(page_title="破军·鹰眼系统3.0", page_icon="🎯", layout="wide")
-
-# 极简黑白灰风格 CSS
+# 2. 注入 CSS：复刻截图中的黑白灰高对比色
 st.markdown("""
     <style>
-    .reportview-container { background: #ffffff; }
-    .stMetric { border: 1px solid #f0f0f0; padding: 15px; border-radius: 5px; background: #fafafa; }
-    div.stButton > button { width: 100%; border-radius: 5px; height: 3em; background-color: #f0f2f6; }
-    .logic-card { padding: 20px; border-radius: 10px; margin-bottom: 10px; border-left: 8px solid; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
-    .buy { border-left-color: #ff4b4b; background-color: #fff5f5; } /* A股红涨 */
-    .sell { border-left-color: #28a745; background-color: #f6fff6; } /* A股绿跌 */
-    .wait { border-left-color: #cccccc; background-color: #f8f9fa; }
+    .stApp { background-color: white; }
+    .index-card { text-align: center; padding: 5px; border-radius: 5px; border: 1px solid #f0f0f0; }
+    .price-up { color: #f21b2b; font-weight: bold; font-size: 20px; }
+    .price-down { color: #00a800; font-weight: bold; font-size: 20px; }
+    .label-gray { color: #666; font-size: 14px; }
+    .stock-row { border-bottom: 1px solid #f8f8f8; padding: 10px 0; }
+    [data-testid="column"] { padding: 0 5px !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# 侧边栏：策略参数（逻辑2的体现）
-with st.sidebar:
-    st.header("🎯 战略参数设定")
-    # 逻辑核心：周线与日线的博弈位
-    weekly_trend = st.slider("周线战略支撑位 (%)", -20.0, 0.0, -10.0)
-    daily_chip = st.slider("日线筹码密集区 (%)", -10.0, 0.0, -3.0)
-    stop_loss = st.slider("风控止损强制线 (%)", -15.0, 0.0, -7.0)
-    
-    st.divider()
-    codes_input = st.text_area("✍️ 临时修改监控池 (逗号分隔)", MY_DEFAULT_STOCKS)
-    st.info("💡 提示：若想永久修改默认股票，请修改代码第11行。")
+# --- 核心逻辑：代码自动识别 ---
+def format_code(c):
+    c = c.strip()
+    if len(c) == 6 and c.isdigit():
+        if c.startswith(('6', '9')): return f"sh{c}"
+        else: return f"sz{c}"
+    return c
 
-# 高速抓取函数
-def get_live_data(codes):
+def get_data(codes):
     if not codes: return []
+    url = f"http://qt.gtimg.cn/q={','.join(codes)}"
     try:
-        url = f"http://qt.gtimg.cn/q={codes.replace(' ', '')}"
         res = requests.get(url, timeout=2)
         res.encoding = 'gbk'
-        data = []
-        for line in res.text.split(';'):
-            if len(line) < 50: continue
-            parts = line.split('~')
-            data.append({
-                "name": parts[1], "code": parts[2], "price": float(parts[3]),
-                "change": float(parts[32]), "high": float(parts[33]), "low": float(parts[34]),
-                "volume": float(parts[37]), "turnover": float(parts[38])
-            })
-        return data
+        results = []
+        for line in res.text.strip().split(';'):
+            if '="' not in line: continue
+            info = line.split('=')[1].strip('"').split('~')
+            if len(info) > 38:
+                results.append({
+                    "name": info[1],
+                    "price": float(info[3]),
+                    "change": float(info[32]),
+                    "amount": f"{round(float(info[37])/10000, 1)}亿" if float(info[37]) > 10000 else f"{info[37]}万",
+                    "code": info[2]
+                })
+        return results
     except: return []
 
-# 主界面渲染
-st.title("🎯 破军·鹰眼战略终端")
-st.caption("基于：周线战略定性 + 日线筹码定量 + 主力反人性推演")
+# --- 状态管理：自选股记忆 ---
+if 'watch_list' not in st.session_state:
+    # 默认放几个你关注的，可以随时清空
+    st.session_state.watch_list = ["sh600930", "sh600584", "sh600219", "sz000878"]
 
-stocks = get_live_data(codes_input)
+# --- 侧边栏：搜索添加 ---
+with st.sidebar:
+    st.subheader("🔍 添加股票")
+    input_code = st.text_input("输入代码 (如 002428)", placeholder="输入后点添加...")
+    if st.button("➕ 添加到自选"):
+        if input_code:
+            formatted = format_code(input_code)
+            st.session_state.watch_list.insert(0, formatted) # 新加的在最上面
+            st.session_state.watch_list = list(dict.fromkeys(st.session_state.watch_list))
+            st.rerun()
+    
+    if st.button("🗑️ 清空所有列表"):
+        st.session_state.watch_list = []
+        st.rerun()
 
-if stocks:
-    # 第一排：核心行情
-    cols = st.columns(len(stocks))
-    for i, s in enumerate(stocks):
-        with cols[i]:
-            # A股习惯：涨显示红色(normal)，跌显示绿色(inverse)
-            color = "normal" if s['change'] >= 0 else "inverse"
-            st.metric(s['name'], f"¥{s['price']}", f"{s['change']}%", delta_color=color)
+# --- 主界面开始 ---
 
-    st.divider()
+# 1. 顶部指数区 (上证, 深证, A50)
+indices = get_data(["sh000001", "sz399001", "sh510100"]) # A50用510100ETF代替行情或直接找期货接口
+idx_names = ["上证指数", "深证成指", "富时A50"]
 
-    # 第二排：鹰眼逻辑看板
-    st.subheader("🔍 实时博弈推演")
-    for s in stocks:
-        change = s['change']
-        
-        # 核心逻辑结合（逻辑2+3）
-        if change <= stop_loss:
-            style, status, advice = "buy", "🛑 趋势破位", "已击穿风控底线。主力可能已完成阶段性收割，建议执行坚决风控，保留筹码。"
-        elif change <= weekly_trend:
-            style, status, advice = "buy", "💎 周线战略区", "触及周线级别大支撑。此处为长线反博弈点，主力大概率在此洗盘接筹，建议分批加仓。"
-        elif change <= daily_chip:
-            style, status, advice = "buy", "📈 日线筹码位", "进入日线筹码密集区，符合‘仓位滚动法’买入逻辑。观察换手率是否缩量。"
-        else:
-            style, status, advice = "wait", "⚖️ 均衡波动", "目前处于博弈真空期。建议保持原有仓位不动，等待参数触碰。"
-        
-        # A股配色修正：跌的时候（买点）显示醒目颜色
-        card_color = "buy" if change < 0 else "wait"
-
-        st.markdown(f"""
-            <div class="logic-card {card_color}">
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:1.2em; font-weight:bold;">{s['name']} ({s['code']})</span>
-                    <span style="font-weight:bold; color:{'#ff4b4b' if change >=0 else '#28a745'}">{status}</span>
+if len(indices) >= 3:
+    idx_cols = st.columns(3)
+    for i, s in enumerate(indices):
+        with idx_cols[i]:
+            color = "price-up" if s['change'] >= 0 else "price-down"
+            st.markdown(f"""
+                <div class="index-card">
+                    <div class="label-gray">{idx_names[i]}</div>
+                    <div class="{color}">{s['price']}</div>
+                    <div class="{color}" style="font-size:14px;">{s['change']}%</div>
                 </div>
-                <div style="margin-top:10px; font-size:0.95em; color:#444;">
-                    <b>分析报告：</b>{advice}<br/>
-                    <small>关键数据：换手 {s['turnover']}% | 今日振幅 {round(s['high']-s['low'], 2)}</small>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-else:
-    st.error("数据连接超时或代码格式错误。")
+            """, unsafe_allow_html=True)
 
-if st.button("🔄 立即同步最新行情"):
+st.markdown("<br>", unsafe_allow_html=True)
+
+# 2. 自选股表头
+h1, h2, h3, h4 = st.columns([2, 1.2, 1.2, 1.5])
+h1.markdown("<span class='label-gray'>名称</span>", unsafe_allow_html=True)
+h2.markdown("<span class='label-gray'>最新</span>", unsafe_allow_html=True)
+h3.markdown("<span class='label-gray'>涨幅</span>", unsafe_allow_html=True)
+h4.markdown("<span class='label-gray'>成交额</span>", unsafe_allow_html=True)
+
+# 3. 自选股列表
+stocks_data = get_data(st.session_state.watch_list)
+for s in stocks_data:
+    c1, c2, c3, c4 = st.columns([2, 1.2, 1.2, 1.5])
+    color = "price-up" if s['change'] >= 0 else "price-down"
+    
+    c1.markdown(f"**{s['name']}**<br><small style='color:#999'>{s['code']}</small>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='{color}' style='padding-top:10px'>{s['price']}</div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='{color}' style='padding-top:10px'>{'+' if s['change']>0 else ''}{s['change']}%</div>", unsafe_allow_html=True)
+    c4.markdown(f"<div style='padding-top:10px'>{s['amount']}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='stock-row'></div>", unsafe_allow_html=True)
+
+# 自动刷新按钮（放底部不挡路）
+if st.button("🔄 刷新行情"):
     st.rerun()
