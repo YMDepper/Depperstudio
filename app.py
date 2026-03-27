@@ -4,15 +4,16 @@ import requests
 # 1. 页面极简专业配置
 st.set_page_config(page_title="鹰眼作战终端", layout="wide")
 
-# 2. 注入 CSS：打造紧凑、重点突出的“实战卡牌”视觉
+# [核心修复 2]：把记忆池提取到最外层，保证全局刷新绝对不丢数据
+if 'pool' not in st.session_state:
+    st.session_state.pool = ["sz002428"] # 默认先放个云南锗业做演示
+
+# 2. 注入 CSS
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f6; }
     .index-bar { background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-    .stock-card { 
-        background: white; border-radius: 12px; padding: 15px 20px; 
-        box-shadow: 0 4px 10px rgba(0,0,0,0.08); margin-bottom: 20px;
-    }
+    .stock-card { background: white; border-radius: 12px; padding: 15px 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); margin-bottom: 20px; }
     .price-large { font-size: 32px; font-weight: bold; line-height: 1.1; }
     .premium-bar { padding: 8px 12px; border-radius: 6px; margin: 10px 0; font-size: 14px; font-weight: bold; border-left: 5px solid; }
     .data-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px dashed #eee; }
@@ -47,12 +48,11 @@ def get_data(codes):
 
 # --- 核心逻辑推演 ---
 def analyze_logic(s):
-    # 1. 开盘溢价率计算 (当天开盘价 - 昨天收盘价) ÷ 昨天收盘价 × 100%
+    # 开盘溢价率
     if s['last_close'] > 0:
         premium = round((s['open'] - s['last_close']) / s['last_close'] * 100, 2)
     else: premium = 0
     
-    # 溢价率逻辑判定
     if premium > 5:
         p_color, p_bg, p_text, p_advice = "#f21b2b", "#fff0f0", f"溢价 {premium}% | 主力抢筹", "开盘不破-3%大概率冲高连板"
     elif premium >= 3:
@@ -62,7 +62,7 @@ def analyze_logic(s):
     else:
         p_color, p_bg, p_text, p_advice = "#00a800", "#e8f5e9", f"溢价 {premium}% | 主力出货", "开盘就跑，谨防被套！"
 
-    # 2. 模拟日内 W&R
+    # W&R 指标
     range_val = (s['high'] - s['low'])
     wr = round((s['high'] - s['price']) / range_val * 100, 2) if range_val != 0 else 50
     
@@ -71,7 +71,6 @@ def analyze_logic(s):
     else:
         wr_display = f"<span style='color:#f21b2b'>{wr} 🔴↑ 逢低买入</span>"
 
-    # 3. 主颜色
     main_color = "#f21b2b" if s['change'] >= 0 else "#00a800"
     
     return premium, p_color, p_bg, p_text, p_advice, wr_display, main_color
@@ -84,7 +83,6 @@ with c1:
     new_stock = st.text_input("", placeholder="🔍 输入代码直接挂载 (如 002428)", label_visibility="collapsed")
 with c2:
     if st.button("🚀 实时挂载", use_container_width=True):
-        if 'pool' not in st.session_state: st.session_state.pool = []
         if new_stock:
             c = new_stock.strip()
             if len(c) == 6 and c.isdigit(): c = f"sh{c}" if c.startswith(('6', '9')) else f"sz{c}"
@@ -92,11 +90,10 @@ with c2:
             st.session_state.pool = list(dict.fromkeys(st.session_state.pool))
             st.rerun()
 
-data = get_data(st.session_state.get('pool', []))
+data = get_data(st.session_state.pool)
 if data:
     idx_data, stocks_data = data[:3], data[3:]
     
-    # 顶部指数
     cols = st.columns(3)
     idx_names = ["上证指数", "深证成指", "富时A50"]
     for i, s in enumerate(idx_data):
@@ -119,10 +116,10 @@ if data:
     st.markdown("---")
     st.subheader("📋 实时狙击卡牌")
 
-    # 股票卡牌遍历
     for s in stocks_data:
         premium, p_color, p_bg, p_text, p_advice, wr_display, main_color = analyze_logic(s)
         
+        # [核心修复 1]：删除了 HTML 中间的所有空行和注释，变成一块结实的代码，彻底解决乱码
         st.markdown(f"""
             <div class="stock-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -135,12 +132,10 @@ if data:
                         <div style="color:{main_color}; font-weight:bold;">{'+' if s['change']>0 else ''}{s['change']}%</div>
                     </div>
                 </div>
-                
                 <div class="premium-bar" style="background-color:{p_bg}; border-left-color:{p_color}; color:{p_color};">
                     <div>🎯 {p_text}</div>
                     <div style="font-size:12px; margin-top:3px; font-weight:normal; color:#555;">💡 战法纪律：{p_advice}</div>
                 </div>
-                
                 <div class="data-grid">
                     <div class="data-item">
                         <div class="data-val">{wr_display}</div>
@@ -163,7 +158,7 @@ if data:
         """, unsafe_allow_html=True)
 
 else:
-    st.info("监控池为空。请在上方输入代码（如 002428）挂载实战卡牌。")
+    st.info("监控池为空。请在上方输入代码挂载实战卡牌。")
 
 if st.button("🔄 同步刷新行情"):
     st.rerun()
