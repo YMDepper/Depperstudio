@@ -4,7 +4,7 @@ import requests
 st.set_page_config(page_title="鹰眼作战终端", layout="wide")
 
 if 'pool' not in st.session_state:
-    st.session_state.pool = ["sz002428"] # 默认保留云南锗业
+    st.session_state.pool = ["sz002428"] 
 
 st.markdown("""
     <style>
@@ -20,7 +20,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 抓取更多高密度数据 ---
 def get_data(codes):
     if not codes: return []
     fixed = ["sh000001", "sz399001", "sh510100"] 
@@ -33,27 +32,23 @@ def get_data(codes):
         for line in res.text.strip().split(';'):
             if '="' not in line: continue
             v = line.split('=')[1].strip('"').split('~')
-            if len(v) < 48: continue # 确保获取到足够多的字段
+            if len(v) < 48: continue
             results.append({
                 "name": v[1], "code": v[2], "price": float(v[3]),
                 "last_close": float(v[4]), "open": float(v[5]),
                 "change": float(v[32]), "high": float(v[33]), "low": float(v[34]),
                 "volume": float(v[37]), "turnover": float(v[38]),
-                "amplitude": float(v[43]), "limit_up": float(v[47]) # 新增：振幅 和 涨停价
+                "amplitude": float(v[43]), "limit_up": float(v[47]) 
             })
         return results
     except: return []
 
-# --- 鹰眼评分与反人性推演逻辑 ---
 def analyze_logic(s):
-    # 1. 基础指标计算
     premium = round((s['open'] - s['last_close']) / s['last_close'] * 100, 2) if s['last_close'] > 0 else 0
-    # 盘中实体 (当前价对比开盘价的涨跌，判断主力是买是卖)
     intraday_body = round((s['price'] - s['open']) / s['open'] * 100, 2) if s['open'] > 0 else 0
     range_val = (s['high'] - s['low'])
     wr = round((s['high'] - s['price']) / range_val * 100, 2) if range_val != 0 else 50
 
-    # 2. 鹰眼评分 & 反向博弈逻辑
     score = 60
     advice = "中性震荡，观望为主"
     card_color = "#ccc"
@@ -75,32 +70,24 @@ def analyze_logic(s):
         advice = "🧊 彻底弱势，毫无承接，坚决规避"
         card_color = "#00a800"
 
-    # W&R 极限位置加减分
     if wr > 85: 
         score += 10; advice += " (极度超跌，留意反抽)"
     if wr < 15: 
         score -= 10; advice += " (极度超买，随时回调)"
 
-    # 评分边界修正
     score = max(0, min(100, score))
     
-    # 分数颜色
-    if score >= 80: badge_bg = "#f21b2b" # 红
-    elif score <= 40: badge_bg = "#00a800" # 绿
-    else: badge_bg = "#ff9800" # 橙
+    if score >= 80: badge_bg = "#f21b2b" 
+    elif score <= 40: badge_bg = "#00a800" 
+    else: badge_bg = "#ff9800" 
 
-    # 3. W&R 视觉处理
     wr_display = f"<span style='color:#00a800'>{wr} 🟢 买点</span>" if wr >= 50 else f"<span style='color:#f21b2b'>{wr} 🔴 卖点</span>"
-    
-    # 实体视觉处理 (K线红绿)
     ib_color = "#f21b2b" if intraday_body >= 0 else "#00a800"
     ib_display = f"<span style='color:{ib_color}'>{'+' if intraday_body>0 else ''}{intraday_body}%</span>"
-
     main_color = "#f21b2b" if s['change'] >= 0 else "#00a800"
     
     return score, badge_bg, advice, card_color, premium, ib_display, wr_display, main_color
 
-# --- 主界面布局 ---
 c1, c2 = st.columns([4, 1])
 with c1:
     new_stock = st.text_input("", placeholder="🔍 输入代码直接挂载 (如 002428)", label_visibility="collapsed")
@@ -117,7 +104,6 @@ data = get_data(st.session_state.pool)
 if data:
     idx_data, stocks_data = data[:3], data[3:]
     
-    # 顶部指数
     cols = st.columns(3)
     idx_names = ["上证指数", "深证成指", "富时A50"]
     for i, s in enumerate(idx_data):
@@ -136,6 +122,7 @@ if data:
     for s in stocks_data:
         score, badge_bg, advice, card_color, premium, ib_display, wr_display, main_color = analyze_logic(s)
         
+        # 【关键修复】这里内部绝对不能有任何空行或HTML注释，必须是一整块闭合的代码
         st.markdown(f"""
             <div class="stock-card" style="border-top-color:{card_color}">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -152,7 +139,6 @@ if data:
                         <div style="color:{main_color}; font-weight:bold; font-size:18px;">{'+' if s['change']>0 else ''}{s['change']}%</div>
                     </div>
                 </div>
-                
                 <div class="data-grid">
                     <div class="data-item">
                         <div class="data-val" style="color:#333;">{premium}%</div>
