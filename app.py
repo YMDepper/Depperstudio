@@ -4,9 +4,9 @@ from streamlit_autorefresh import st_autorefresh # 导入自动刷新组件
 
 st.set_page_config(page_title="鹰眼作战终端", layout="wide")
 
-# --- 核心配置：每 5 秒自动刷新全站数据 ---
+# --- 核心配置：每 1 秒自动刷新全站数据 ---
 # limit 是刷新次数限制，设为 None 表示无限次，直到关闭网页
-count = st_autorefresh(interval=5000, limit=None, key="flicker")
+count = st_autorefresh(interval=1000, limit=None, key="flicker")
 
 if 'pool' not in st.session_state:
     st.session_state.pool = ["sz002428"]
