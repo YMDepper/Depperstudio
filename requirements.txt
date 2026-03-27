@@ -1,4 +1,3 @@
 requests
-streamlit
+pandas
 streamlit-autorefresh
-streamlit-echarts  <-- 必须追加这一行
