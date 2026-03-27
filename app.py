@@ -3,66 +3,93 @@ import requests
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# 1. 基础配置
+# 1. 极简页面配置
 st.set_page_config(page_title="鹰眼审计终端", layout="wide")
-st_autorefresh(interval=2000, limit=None, key="eagle_eye_v14")
+st_autorefresh(interval=3000, limit=None, key="eagle_eye_v15")
 
 if 'pool' not in st.session_state:
-    st.session_state.pool = ["sz002428"]
+    st.session_state.pool = ["sz002428", "sh600137"]
 
-# 2. 核心 CSS：强制消除 Streamlit 组件的默认占位
+# 2. 高级感黑金配色 CSS
 st.markdown("""
 <style>
-    .stApp { background-color: #05070a; color: #ffffff; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     
-    /* 容器设为相对定位 */
-    .stock-card { 
-        position: relative; 
-        background: #111827; 
-        border-radius: 10px; 
-        padding: 15px; 
-        margin-bottom: 10px; 
-        border: 1px solid #1f2937;
-        border-left: 5px solid #ef4444;
+    .stApp { background-color: #020408; font-family: 'Inter', sans-serif; }
+    
+    /* 隐藏所有原生组件的边距 */
+    .block-container { padding-top: 2rem !important; }
+    [data-testid="stHeader"] { visibility: hidden; }
+
+    /* 搜索框高级处理 */
+    .stTextInput input {
+        background-color: #0f172a !important; border: 1px solid #1e293b !important;
+        border-radius: 12px !important; color: #f8fafc !important; padding: 12px 20px !important;
     }
 
-    /* 暴力锁定右上角删除：解决移动端错位 */
-    .stButton { position: absolute !important; top: 0 !important; right: 0 !important; width: auto !important; z-index: 1001; }
+    /* 战术卡牌容器 */
+    .stock-card {
+        position: relative; background: linear-gradient(145deg, #111827, #0f172a);
+        border: 1px solid #1e293b; border-radius: 16px; padding: 24px;
+        margin-bottom: 16px; overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    .stock-card:hover { border-color: #3b82f6; box-shadow: 0 10px 30px -10px rgba(59, 130, 246, 0.2); }
+
+    /* 评分勋章 */
+    .score-badge {
+        background: rgba(239, 68, 68, 0.15); color: #ef4444;
+        padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;
+        border: 1px solid rgba(239, 68, 68, 0.3); letter-spacing: 0.5px;
+    }
+
+    /* 数据栅格布局 */
+    .data-grid { display: flex; justify-content: space-between; margin-top: 24px; border-top: 1px solid #1e293b; padding-top: 16px; }
+    .data-item { text-align: center; flex: 1; }
+    .label { color: #64748b; font-size: 11px; text-transform: uppercase; margin-top: 4px; }
+    .value { color: #f8fafc; font-size: 16px; font-weight: 600; }
+
+    /* 交互组件层级锁定 */
+    .interaction-layer { position: absolute; top: 0; right: 0; bottom: 0; width: 60px; z-index: 100; }
+    
+    /* 右上角删除按钮 */
+    .stButton { position: absolute !important; top: 12px !important; right: 12px !important; }
     .stButton button { 
-        background: transparent !important; border: none !important; color: #FFD700 !important; 
-        font-size: 20px !important; padding: 10px 15px !important; box-shadow: none !important;
+        background: transparent !important; border: none !important; color: #475569 !important;
+        font-size: 20px !important; padding: 0 !important;
     }
+    .stButton button:hover { color: #f1f5f9 !important; }
 
-    /* 暴力锁定右下角详情：解决移动端错位 */
-    [data-testid="stCheckbox"] { 
-        position: absolute !important; bottom: 8px !important; right: 10px !important; 
-        width: auto !important; z-index: 1001; margin: 0 !important;
+    /* 右下角详情勾选 */
+    [data-testid="stCheckbox"] { position: absolute !important; bottom: 12px !important; right: 12px !important; }
+    [data-testid="stCheckbox"] label p { color: #475569 !important; font-size: 12px !important; transition: 0.3s; }
+    [data-testid="stCheckbox"]:hover label p { color: #fbbf24 !important; }
+
+    /* 审计卡高级样式 */
+    .audit-card {
+        background: #020617; border: 1px dotted #1e293b; border-radius: 12px;
+        padding: 20px; margin-top: -10px; margin-bottom: 20px;
+        animation: slideDown 0.4s ease-out;
     }
-    [data-testid="stCheckbox"] label p { color: #FFD700 !important; font-weight: bold !important; font-size: 14px !important; }
-
-    /* 数据显示网格调整 */
-    .data-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; text-align: center; margin-top: 15px; width: 85%; }
-    .gold-text { color: #FFD700; font-weight: bold; }
-    
-    /* 详情卡片样式 */
-    .audit-card { background: #0f172a; border: 1px solid #3b82f6; border-radius: 8px; padding: 15px; margin-top: -5px; margin-bottom: 15px; }
+    @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 """, unsafe_allow_html=True)
 
-# --- A. 搜索区 ---
-c_search, _ = st.columns([0.6, 0.4])
+# --- A. 顶栏搜索 (保持干净) ---
+st.markdown('<p style="color:#64748b; font-size:12px; margin-bottom:8px;">鹰眼·实时量化监测</p>', unsafe_allow_html=True)
+c_search, _ = st.columns([0.5, 0.5])
 with c_search:
-    new_c = st.text_input("", placeholder="🔍 输入代码审计 (如 600111)", label_visibility="collapsed")
+    new_c = st.text_input("", placeholder="🔍 输入代码 (例如 600111)", label_visibility="collapsed")
     if new_c:
         c_in = new_c.strip()
         if len(c_in) == 6: c_in = ("sh" if c_in.startswith(('6', '9')) else "sz") + c_in
         if c_in not in st.session_state.pool:
             st.session_state.pool.insert(0, c_in); st.rerun()
 
-# --- B. 审计监控区 ---
+# --- B. 动态卡牌区 ---
 for code in st.session_state.pool:
-    ts = int(time.time() * 1000)
     try:
+        ts = int(time.time() * 1000)
         res = requests.get(f"http://qt.gtimg.cn/q={code}&_t={ts}", timeout=1.0)
         res.encoding = 'gbk'
         v = res.text.split('="')[1].split('~')
@@ -70,55 +97,56 @@ for code in st.session_state.pool:
         last_close, open_p = float(v[4]), float(v[5])
         color = "#ef4444" if change >= 0 else "#22c55e"
         
-        # 逻辑：开盘溢价与实体计算
         prem = round((open_p - last_close) / last_close * 100, 2)
         ib = round((float(price) - open_p) / open_p * 100, 2) if open_p > 0 else 0
 
-        # 开始卡牌渲染
+        # 渲染卡牌容器
         with st.container():
-            # 1. 注入内嵌交互组件 (利用绝对定位直接覆盖在卡牌之上)
+            # 1. 绝对定位交互层
             if st.button("✕", key=f"del_{code}"):
                 st.session_state.pool.remove(code); st.rerun()
-            
-            show_audit = st.checkbox("详情》", key=f"dt_{code}")
+            show_audit = st.checkbox("详情", key=f"dt_{code}")
 
-            # 2. 卡牌主体 HTML
+            # 2. 视觉主体
             st.markdown(f"""
             <div class="stock-card">
-                <div style="display: flex; justify-content: space-between; margin-right: 40px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <div>
-                        <span style="background:#ef4444; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:12px;">评分 92</span>
-                        <span style="font-size:18px; font-weight:bold; margin-left:5px;">{name}</span>
-                        <span style="color:#64748b; font-size:12px; margin-left:5px;">{code}</span>
+                        <div class="score-badge">评分 92</div>
+                        <div style="font-size: 22px; font-weight: 700; color: #f8fafc; margin-top: 12px;">{name}</div>
+                        <div style="color: #475569; font-size: 13px; margin-top: 4px;">{code.upper()}</div>
                     </div>
-                    <div style="text-align:right;">
-                        <span style="font-size:20px; font-weight:bold; color:{color};">{price}</span>
-                        <span style="font-size:13px; font-weight:bold; color:{color}; margin-left:5px;">{change}%</span>
+                    <div style="text-align: right; margin-right: 20px;">
+                        <div style="font-size: 28px; font-weight: 700; color: {color};">{price}</div>
+                        <div style="font-size: 14px; font-weight: 600; color: {color};">{change}%</div>
                     </div>
                 </div>
-                <div style="background:#0a0f1a; padding:10px; border-radius:6px; margin:15px 0; border-left:3px solid #3b82f6; width: 88%; font-size:13px;">
-                    🎯 <b>核心结论：</b> 属于典型的反核博弈信号。资金逆势扫货迹象明显，建议分批挂单。
+                
+                <div style="background: rgba(59, 130, 246, 0.05); padding: 12px 16px; border-radius: 10px; margin-top: 20px; border-left: 2px solid #3b82f6;">
+                    <span style="color: #3b82f6; font-size: 16px; margin-right: 8px;">🎯</span>
+                    <span style="color: #cbd5e1; font-size: 13px; line-height: 1.5;">反核博弈信号成立。主力逆势吸筹明显，承接力度极强，关注分时均线机会。</span>
                 </div>
+
                 <div class="data-grid">
-                    <div><div style="font-size:15px; font-weight:bold;">{prem}%</div><div style="font-size:10px; color:#64748b;">开盘溢价</div></div>
-                    <div><div style="font-size:15px; font-weight:bold; color:{color}">{ib}%</div><div style="font-size:10px; color:#64748b;">盘中实体</div></div>
-                    <div><div style="font-size:15px; font-weight:bold;">39.1</div><div style="font-size:10px; color:#64748b;">W&R</div></div>
-                    <div><div style="font-size:15px; font-weight:bold;">{v[33]}</div><div style="font-size:10px; color:#64748b;">最高</div></div>
-                    <div><div style="font-size:15px; font-weight:bold; color:#ef4444">{round(last_close*1.1, 2)}</div><div style="font-size:10px; color:#64748b;">涨停价</div></div>
+                    <div class="data-item"><div class="value">{prem}%</div><div class="label">开盘溢价</div></div>
+                    <div class="data-item"><div class="value" style="color:{color}">{ib}%</div><div class="label">盘中实体</div></div>
+                    <div class="data-item"><div class="value">39.1</div><div class="label">W&R</div></div>
+                    <div class="data-item"><div class="value">{v[33]}</div><div class="label">最高</div></div>
+                    <div class="data-item"><div class="value" style="color:#ef4444">{round(last_close*1.1, 2)}</div><div class="label">涨停目标</div></div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-            # 3. 详情审计卡 (按需求完整呈现五个部分)
+            # 3. 高级详情抽屉
             if show_audit:
                 st.markdown(f"""
                 <div class="audit-card">
-                    <div style="font-size:13px; line-height:1.6;">
-                        <p><b style="color:#3b82f6;">I. 仪表盘:</b> 总分 <span class="gold-text">92</span> | 周期: <span class="gold-text">主升中继</span> | 指令: <span class="gold-text">积极进攻</span></p>
-                        <p><b style="color:#3b82f6;">II. 五维雷达:</b> 筹码 <span class="gold-text">35/35(+10)</span> | 环境 18 | 排雷 15 | 资金 12 | 决策 12</p>
-                        <p><b style="color:#3b82f6;">III. 真假博弈:</b> 意图: <span class="gold-text">诱空吸筹</span> | 证据: 缩量不破昨收，大单对倒现身。</p>
-                        <p><b style="color:#3b82f6;">IV. 死亡红线:</b> 筹码诈骗/暴雷排查: <span style="color:#22c55e;">安全 (PASS)</span></p>
-                        <p><b style="color:#3b82f6;">V. 战术执行:</b> 进场: <span class="gold-text">{price}</span> | 止损: <span style="color:#ef4444;">{last_close}</span></p>
+                    <div style="color:#94a3b8; font-size:13px; line-height:2;">
+                        <span style="color:#3b82f6; font-weight:bold;">[I] 仪表盘:</span> 鹰眼总分 <b style="color:#fbbf24;">92</b> | 周期: <b style="color:#fbbf24;">主升中继</b> | 决策: <b style="color:#fbbf24;">积极进攻</b><br>
+                        <span style="color:#3b82f6; font-weight:bold;">[II] 五维雷达:</span> 筹码: <b style="color:#fbbf24;">35/35(+10)</b> | 环境: 18 | 排雷: 15 | 资金: 12<br>
+                        <span style="color:#3b82f6; font-weight:bold;">[III] 反向博弈:</span> <b style="color:#fbbf24;">诱空洗盘</b> (证据: 缩量下砸后迅速收回，主力控盘度极高)<br>
+                        <span style="color:#3b82f6; font-weight:bold;">[IV] 风险扫描:</span> 筹码分布 <b style="color:#22c55e;">健康</b> | 质押暴雷 <b style="color:#22c55e;">无</b><br>
+                        <span style="color:#3b82f6; font-weight:bold;">[V] 战术指令:</span> 进场 <b style="color:#fbbf24;">{price}</b> | 止损位 <b style="color:#ef4444;">{last_close}</b>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
