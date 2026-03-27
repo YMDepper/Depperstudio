@@ -1,3 +1,4 @@
 requests
 streamlit
 streamlit-autorefresh
+streamlit-echarts  <-- 必须追加这一行
