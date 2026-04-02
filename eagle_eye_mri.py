@@ -50,7 +50,6 @@ st.set_page_config(
 )
 
 # -------------------------- 全局会话状态持久化（解决刷新/后台退出重进问题） --------------------------
-# 初始化所有持久化变量
 if 'stock_code' not in st.session_state:
     st.session_state.stock_code = ''
 if 'l2_5d_score' not in st.session_state:
@@ -63,6 +62,24 @@ if 'audit_data' not in st.session_state:
     st.session_state.audit_data = None
 if 'load_finished' not in st.session_state:
     st.session_state.load_finished = False
+
+# -------------------------- 安全数据获取工具函数（彻底解决索引越界报错） --------------------------
+def safe_iloc(df, index, default=None):
+    """安全取DataFrame的iloc值，为空则返回默认值，彻底解决索引越界"""
+    try:
+        if len(df) > abs(index):
+            return df.iloc[index]
+        else:
+            return default if default is not None else pd.Series()
+    except:
+        return default if default is not None else pd.Series()
+
+def safe_round(value, decimals=2, default=0):
+    """安全四舍五入，为空则返回默认值"""
+    try:
+        return round(float(value), decimals)
+    except:
+        return default
 
 # -------------------------- 极速缓存优化（按数据类型分配合适的缓存时间） --------------------------
 @st.cache_data(ttl=1800, show_spinner=False)  # 大盘数据缓存30分钟
@@ -96,10 +113,10 @@ def get_stock_basic_info_cached(stock_code):
     try:
         basic_df = ak.stock_individual_info_em(symbol=stock_code)
         basic_dict = dict(zip(basic_df['item'], basic_df['value']))
-        industry_df = ak.stock_board_industry_cons_em(symbol=basic_dict['行业'])
-        industry_rank = industry_df[industry_df['代码'] == stock_code].index[0] + 1 if not industry_df.empty else 999
+        industry_df = ak.stock_board_industry_cons_em(symbol=basic_dict.get('行业', ''))
+        industry_rank = industry_df[industry_df['代码'] == stock_code].index[0] + 1 if not industry_df.empty and stock_code in industry_df['代码'].values else 999
         basic_dict['行业排名'] = industry_rank
-        basic_dict['行业总家数'] = len(industry_df)
+        basic_dict['行业总家数'] = len(industry_df) if not industry_df.empty else 1000
         return basic_dict
     except:
         return {}
@@ -116,9 +133,10 @@ def get_stock_kline_cached(stock_code):
             end_date=end_date,
             adjust="qfq"
         )
-        kline_df['ma20'] = kline_df['收盘'].rolling(window=20).mean()
-        kline_df['ma60'] = kline_df['收盘'].rolling(window=60).mean()
-        kline_df['ma120'] = kline_df['收盘'].rolling(window=120).mean()
+        if len(kline_df) >= 120:
+            kline_df['ma20'] = kline_df['收盘'].rolling(window=20).mean()
+            kline_df['ma60'] = kline_df['收盘'].rolling(window=60).mean()
+            kline_df['ma120'] = kline_df['收盘'].rolling(window=120).mean()
         return kline_df
     except:
         return pd.DataFrame()
@@ -138,9 +156,9 @@ def get_stock_financial_data_cached(stock_code):
         goodwill_df = ak.stock_financial_report_sina(stock=stock_code, symbol="资产负债表")
         pledge_df = ak.stock_holder_pledge_em(symbol=stock_code)
         risk_df = ak.stock_em_st_warning()
-        is_st = stock_code in risk_df['代码'].values
+        is_st = stock_code in risk_df['代码'].values if not risk_df.empty else False
         legal_df = ak.stock_em_legal_proceeding()
-        is_legal = stock_code in legal_df['证券代码'].values
+        is_legal = stock_code in legal_df['证券代码'].values if not legal_df.empty else False
         return {
             "financial": financial_df,
             "goodwill": goodwill_df,
@@ -155,7 +173,8 @@ def get_stock_financial_data_cached(stock_code):
 def get_chip_distribution_cached(stock_code):
     try:
         chip_df = ak.stock_chip_distribution_em(symbol=stock_code)
-        return chip_df.iloc[-1] if not chip_df.empty else {}, chip_df
+        latest_chip = chip_df.iloc[-1] if len(chip_df) > 0 else {}
+        return latest_chip, chip_df
     except:
         return {}, pd.DataFrame()
 
@@ -163,7 +182,7 @@ def get_chip_distribution_cached(stock_code):
 def get_hot_industry_cached():
     try:
         hot_df = ak.stock_sector_fund_flow_rank_em(indicator="今日")
-        return hot_df.head(10)['行业名称'].tolist()
+        return hot_df.head(10)['行业名称'].tolist() if not hot_df.empty else []
     except:
         return []
 
@@ -174,20 +193,24 @@ def macro_audit_fast(market_data, index_data):
     detail = {"market_env": 0, "liquidity": 0, "policy": 3, "risk_detail": ""}
 
     try:
-        sz_index = index_data[index_data['代码'] == 'sh000001'].iloc[0]
-        latest_close = sz_index['最新价']
+        sz_index = safe_iloc(index_data[index_data['代码'] == 'sh000001'], 0)
+        latest_close = sz_index.get('最新价', 0)
         sz_kline = ak.stock_zh_index_hist_csindex(
             symbol='000001',
             start_date=(datetime.now()-timedelta(days=180)).strftime('%Y%m%d'),
             end_date=datetime.now().strftime('%Y%m%d')
         )
-        sz_kline['ma120'] = sz_kline['收盘'].rolling(window=120).mean()
-        ma120 = sz_kline.iloc[-1]['ma120']
-        ma120_prev = sz_kline.iloc[-5]['ma120'] if len(sz_kline)>=5 else ma120
+        if len(sz_kline) >= 120:
+            sz_kline['ma120'] = sz_kline['收盘'].rolling(window=120).mean()
+            ma120 = safe_iloc(sz_kline, -1).get('ma120', 0)
+            ma120_prev = safe_iloc(sz_kline, -5).get('ma120', ma120)
+        else:
+            ma120 = 0
+            ma120_prev = 0
 
-        if latest_close > ma120 and ma120 > ma120_prev:
+        if latest_close > ma120 and ma120 > ma120_prev and ma120 != 0:
             detail['market_env'] = 4
-        elif latest_close > ma120:
+        elif latest_close > ma120 and ma120 != 0:
             detail['market_env'] = 2
         else:
             detail['market_env'] = 0
@@ -198,10 +221,11 @@ def macro_audit_fast(market_data, index_data):
         detail['risk_detail'] += "大盘数据获取异常，默认中性；"
 
     try:
-        trade_amount = market_data['trade_amount'].iloc[0]['两市成交额']
-        north_flow = market_data['north_flow'].iloc[-1]['净流入']
-        main_flow = market_data['market_flow'].iloc[0]['主力净流入-净额']
-        if north_flow > 0 and main_flow > 0 and trade_amount > 8000:
+        trade_amount_row = safe_iloc(market_data.get('trade_amount', pd.DataFrame()), 0)
+        trade_amount = trade_amount_row.get('两市成交额', 0)
+        north_flow = safe_iloc(market_data.get('north_flow', pd.DataFrame()), -1).get('净流入', 0)
+        main_flow = safe_iloc(market_data.get('market_flow', pd.DataFrame()), 0).get('主力净流入-净额', 0)
+        if north_flow > 0 and main_flow > 0 and trade_amount > 800000000000:
             detail['liquidity'] = 3
         elif north_flow > 0 or main_flow > 0:
             detail['liquidity'] = 1
@@ -214,13 +238,13 @@ def macro_audit_fast(market_data, index_data):
     score = detail['market_env'] + detail['liquidity'] + detail['policy']
     return 0 if red_line_trigger else score, detail, red_line_trigger
 
-def industry_audit_fast(industry_name, industry_flow_df, hot_industry_list):
+def industry_audit_fast(industry_name, industry_flow_df, hot_industry_list, basic_info):
     score = 0
     red_line_trigger = False
     detail = {"boom": 0, "competition": 0, "plate_effect": 0, "risk_detail": ""}
 
     try:
-        net_flow_5d = industry_flow_df.iloc[0]['5日净流入-净额'] if not industry_flow_df.empty else 0
+        net_flow_5d = safe_iloc(industry_flow_df, 0).get('5日净流入-净额', 0)
         if net_flow_5d > 0:
             detail['boom'] = 8
         elif net_flow_5d == 0:
@@ -234,7 +258,7 @@ def industry_audit_fast(industry_name, industry_flow_df, hot_industry_list):
         detail['risk_detail'] += "行业景气度数据获取异常，默认中性；"
 
     try:
-        industry_rank = st.session_state.basic_info.get('行业排名', 999)
+        industry_rank = basic_info.get('行业排名', 999)
         if industry_rank <= 3:
             detail['competition'] = 6
         elif industry_rank <= 10:
@@ -247,7 +271,7 @@ def industry_audit_fast(industry_name, industry_flow_df, hot_industry_list):
 
     try:
         if industry_name in hot_industry_list and not industry_flow_df.empty:
-            net_flow_5d = industry_flow_df.iloc[0]['5日净流入-净额']
+            net_flow_5d = safe_iloc(industry_flow_df, 0).get('5日净流入-净额', 0)
             detail['plate_effect'] = 6 if net_flow_5d > 0 else 3
         elif industry_name in hot_industry_list:
             detail['plate_effect'] = 3
@@ -286,25 +310,23 @@ def company_audit_fast(stock_code, financial_data, basic_info):
 
     try:
         financial_df = financial_data.get('financial', pd.DataFrame())
-        if not financial_df.empty:
-            net_profit_yoy = financial_df.iloc[0]['扣非净利润同比增长']
-            operate_cash = financial_df.iloc[0]['经营活动产生的现金流量净额']
-            revenue_yoy = financial_df.iloc[0]['营业收入同比增长']
-            if net_profit_yoy > 0 and operate_cash > 0 and revenue_yoy > 0:
-                detail['profit'] = 3
-            elif net_profit_yoy > 0:
-                detail['profit'] = 1
-            else:
-                detail['profit'] = 0
-        else:
+        latest_finance = safe_iloc(financial_df, 0)
+        net_profit_yoy = latest_finance.get('扣非净利润同比增长', 0)
+        operate_cash = latest_finance.get('经营活动产生的现金流量净额', 0)
+        revenue_yoy = latest_finance.get('营业收入同比增长', 0)
+        if net_profit_yoy > 0 and operate_cash > 0 and revenue_yoy > 0:
+            detail['profit'] = 3
+        elif net_profit_yoy > 0:
             detail['profit'] = 1
+        else:
+            detail['profit'] = 0
     except:
         detail['profit'] = 1
         detail['risk_detail'] += "盈利数据获取异常，默认中性；"
 
     try:
         pledge_df = financial_data.get('pledge', pd.DataFrame())
-        pledge_ratio = pledge_df.iloc[0]['质押比例'] if not pledge_df.empty else 0
+        pledge_ratio = safe_iloc(pledge_df, 0).get('质押比例', 0)
         if pledge_ratio < 10:
             detail['governance'] = 3
         elif pledge_ratio < 30:
@@ -325,11 +347,11 @@ def chip_audit_fast(chip_data, chip_df, kline_df, stock_code):
 
     try:
         price_range = chip_data.get('90%成本区间', '0-0').split('-')
-        price_range = [float(x) for x in price_range]
+        price_range = [float(x) for x in price_range] if len(price_range)==2 else [0,0]
         range_ratio = (price_range[1] - price_range[0]) / price_range[0] if price_range[0] !=0 else 1
         detail['shape'] = 8 if range_ratio < 0.15 else 2
 
-        chip_5d_ago = chip_df.iloc[-5] if len(chip_df)>=5 else chip_data
+        chip_5d_ago = safe_iloc(chip_df, -5, chip_data)
         current_bottom = chip_data.get('获利比例', 0)
         prev_bottom = chip_5d_ago.get('获利比例', 0)
         detail['lock'] = 6 if abs(current_bottom - prev_bottom) < 10 else 2
@@ -353,11 +375,15 @@ def technical_audit_fast(kline_df):
     score = 0
     detail = {"lifeline": 0, "trend": 0, "risk_detail": ""}
     try:
-        latest_data = kline_df.iloc[-1]
-        detail['lifeline'] = 4 if latest_data['收盘'] > latest_data['ma120'] else 0
-        if latest_data['收盘'] > latest_data['ma20'] and latest_data['ma20'] > latest_data['ma60'] and latest_data['ma60'] > latest_data['ma120']:
+        latest_data = safe_iloc(kline_df, -1)
+        close_price = latest_data.get('收盘', 0)
+        ma120 = latest_data.get('ma120', 0)
+        ma60 = latest_data.get('ma60', 0)
+        ma20 = latest_data.get('ma20', 0)
+        detail['lifeline'] = 4 if close_price > ma120 and ma120 !=0 else 0
+        if close_price > ma20 and ma20 > ma60 and ma60 > ma120 and ma20 !=0:
             detail['trend'] = 4
-        elif latest_data['收盘'] > latest_data['ma60']:
+        elif close_price > ma60 and ma60 !=0:
             detail['trend'] = 2
         else:
             detail['trend'] = 0
@@ -370,26 +396,32 @@ def risk_audit_fast(financial_data, basic_info):
     score = 0
     red_line_trigger = False
     detail = {"goodwill": 0, "market_cap": 0, "risk_detail": ""}
+
     try:
         goodwill_df = financial_data.get('goodwill', pd.DataFrame())
-        if not goodwill_df.empty:
-            goodwill = goodwill_df.iloc[0]['商誉']
-            net_asset = goodwill_df.iloc[0]['所有者权益合计']
-            goodwill_ratio = goodwill / net_asset if net_asset !=0 else 1
-            if goodwill_ratio < 0.15:
-                detail['goodwill'] = 4
-            elif 0.15 <= goodwill_ratio < 0.3:
-                detail['goodwill'] = 0
-            else:
-                detail['goodwill'] = -10
-                red_line_trigger = True
-                detail['risk_detail'] += "商誉占净资产超30%，触发排雷红线；"
+        latest_balance = safe_iloc(goodwill_df, 0)
+        goodwill = latest_balance.get('商誉', 0)
+        net_asset = latest_balance.get('所有者权益合计', 0)
+        goodwill_ratio = goodwill / net_asset if net_asset !=0 else 1
+        if goodwill_ratio < 0.15:
+            detail['goodwill'] = 4
+        elif 0.15 <= goodwill_ratio < 0.3:
+            detail['goodwill'] = 0
         else:
-            detail['goodwill'] = 2
+            detail['goodwill'] = -10
+            red_line_trigger = True
+            detail['risk_detail'] += "商誉占净资产超30%，触发排雷红线；"
+    except:
+        detail['goodwill'] = 2
+        detail['risk_detail'] += "商誉数据获取异常，默认中性；"
+
+    try:
         market_cap = basic_info.get('总市值', 0)
         detail['market_cap'] = 3 if market_cap > 3000000000 else 0
     except:
-        detail['risk_detail'] += "排雷数据获取异常；"
+        detail['market_cap'] = 0
+        detail['risk_detail'] += "市值数据获取异常；"
+
     score = detail['goodwill'] + detail['market_cap']
     return score, detail, red_line_trigger
 
@@ -397,13 +429,16 @@ def fund_activity_audit_fast(kline_df):
     score = 0
     detail = {"attack": 0, "purity": 0, "risk_detail": ""}
     try:
-        latest_data = kline_df.iloc[-1]
-        turnover_rate = latest_data['换手率']
-        volume_ratio = latest_data['成交量'] / kline_df.iloc[-20:-1]['成交量'].mean()
+        latest_data = safe_iloc(kline_df, -1)
+        turnover_rate = latest_data.get('换手率', 0)
+        avg_volume = kline_df.iloc[-20:-1]['成交量'].mean() if len(kline_df)>=20 else latest_data.get('成交量', 0)
+        volume_ratio = latest_data.get('成交量', 0) / avg_volume if avg_volume !=0 else 0
         detail['attack'] = 3 if volume_ratio > 1.5 or turnover_rate > 3 else 0
-        recent_30d = kline_df.iloc[-30:]
-        max_shadow = (recent_30d['最高'] - recent_30d['收盘']).max() / recent_30d['收盘']
-        detail['purity'] = 2 if max_shadow < 0.08 else 0
+
+        recent_30d = kline_df.iloc[-30:] if len(kline_df)>=30 else kline_df
+        if len(recent_30d) > 0:
+            max_shadow = (recent_30d['最高'] - recent_30d['收盘']).max() / recent_30d['收盘'].mean() if recent_30d['收盘'].mean() !=0 else 0
+            detail['purity'] = 2 if max_shadow < 0.08 else 0
     except:
         detail['risk_detail'] += "资金活性数据计算异常；"
     score = detail['attack'] + detail['purity']
@@ -413,44 +448,52 @@ def odds_audit_fast(kline_df):
     score = 0
     detail = {"r_value": 0, "support": 0, "pressure": 0, "risk_detail": ""}
     try:
-        latest_close = kline_df.iloc[-1]['收盘']
-        support = min(kline_df.iloc[-20:]['最低'].min(), kline_df.iloc[-1]['ma60'])
-        pressure = kline_df.iloc[-60:]['最高'].max()
-        if latest_close - support != 0:
+        latest_close = safe_iloc(kline_df, -1).get('收盘', 0)
+        min_20d = kline_df.iloc[-20:]['最低'].min() if len(kline_df)>=20 else latest_close*0.92
+        ma60 = safe_iloc(kline_df, -1).get('ma60', latest_close*0.92)
+        support = min(min_20d, ma60)
+        pressure = kline_df.iloc[-60:]['最高'].max() if len(kline_df)>=60 else latest_close*1.2
+
+        if latest_close - support > 0.01:
             r_value = (pressure - latest_close) / (latest_close - support)
         else:
             r_value = 0
+
         if r_value > 3.0:
             detail['r_value'] = 5
         elif 2.0 < r_value <= 3.0:
             detail['r_value'] = 3
         else:
             detail['r_value'] = 0
+
         detail['support'] = round(support, 2)
         detail['pressure'] = round(pressure, 2)
         detail['r_value'] = round(r_value, 2)
     except:
         detail['risk_detail'] += "赔率计算异常；"
+        detail['support'] = 0
+        detail['pressure'] = 0
+        detail['r_value'] = 0
     score = detail['r_value'] if detail['r_value'] <=5 else 5
     return score, detail
 
 def cycle_position_fast(kline_df, chip_data, chip_df):
     try:
-        latest_data = kline_df.iloc[-1]
-        ma120 = latest_data['ma120']
-        close = latest_data['收盘']
-        chip_5d_ago = chip_df.iloc[-5] if len(chip_df)>=5 else chip_data
+        latest_data = safe_iloc(kline_df, -1)
+        ma120 = latest_data.get('ma120', 0)
+        close = latest_data.get('收盘', 0)
+        chip_5d_ago = safe_iloc(chip_df, -5, chip_data)
         chip_lock = abs(chip_data.get('获利比例', 0) - chip_5d_ago.get('获利比例', 0)) < 10
         profit_ratio = chip_data.get('获利比例', 0)
         concentration = chip_data.get('90%成本集中度', 100)
 
-        if close < ma120 and kline_df['ma120'].iloc[-5] > ma120:
+        if close < ma120 and ma120 !=0 and safe_iloc(kline_df, -5).get('ma120', ma120) > ma120:
             return "崩塌期"
-        elif close > ma120 and profit_ratio > 90 and not chip_lock:
+        elif close > ma120 and profit_ratio > 90 and not chip_lock and ma120 !=0:
             return "派发期"
-        elif close > ma120 and 0.3 <= close/ma120 -1 <= 1 and chip_lock:
+        elif close > ma120 and 0.3 <= close/ma120 -1 <= 1 and chip_lock and ma120 !=0:
             return "主升期"
-        elif abs(close - ma120)/ma120 < 0.1 and concentration < 10:
+        elif abs(close - ma120)/ma120 < 0.1 and concentration < 10 and ma120 !=0:
             return "潜伏期"
         else:
             return "潜伏期"
@@ -459,7 +502,7 @@ def cycle_position_fast(kline_df, chip_data, chip_df):
 
 # -------------------------- 页面主程序 --------------------------
 st.title("📊 Depp·鹰眼 MRI 审计子系统 v1.9 终版")
-st.caption("全量无损终版 | 极速加载优化 | 会话持久化 | 实时数据更新")
+st.caption("全量无损终版 | 极速加载优化 | 会话持久化 | 实时数据更新 | 异常兜底修复")
 
 # 1. 股票代码输入与实时刷新按钮
 col1, col2, col3 = st.columns([3, 1, 1])
@@ -527,12 +570,19 @@ if run_button and stock_code_input:
     status_text = st.empty()
 
     try:
-        # 第一步：预加载所有缓存数据（一次性拉取，无重复调用）
+        # 第一步：预加载所有缓存数据（一次性拉取，无重复调用，全兜底）
         status_text.text("1/8 正在加载大盘全景数据...")
         progress_bar.progress(10)
         index_data = get_index_data_cached()
         market_data = get_market_overview_cached()
         hot_industry = get_hot_industry_cached()
+
+        # 安全提取大盘基础数据（提前处理，避免渲染时报错）
+        trade_amount_row = safe_iloc(market_data.get('trade_amount', pd.DataFrame()), 0)
+        trade_amount = trade_amount_row.get('两市成交额', 0)
+        north_flow = safe_iloc(market_data.get('north_flow', pd.DataFrame()), -1).get('净流入', 0)
+        limit_up_count = len(market_data.get('limit_up', pd.DataFrame()))
+        limit_down_count = len(market_data.get('limit_down', pd.DataFrame()))
 
         status_text.text("2/8 正在加载个股基础信息...")
         progress_bar.progress(20)
@@ -540,14 +590,21 @@ if run_button and stock_code_input:
         st.session_state.basic_info = basic_info
         industry_name = basic_info.get('行业', '')
         industry_flow_df = get_industry_fund_flow_cached(industry_name)
+        industry_flow_5d = safe_iloc(industry_flow_df, 0).get('5日净流入-净额', 0)
 
         status_text.text("3/8 正在加载个股K线数据...")
         progress_bar.progress(35)
         kline_df = get_stock_kline_cached(st.session_state.stock_code)
+        current_close = safe_iloc(kline_df, -1).get('收盘', 0)
 
         status_text.text("4/8 正在加载个股财务数据...")
         progress_bar.progress(50)
         financial_data = get_stock_financial_data_cached(st.session_state.stock_code)
+        financial_df = financial_data.get('financial', pd.DataFrame())
+        latest_finance = safe_iloc(financial_df, 0)
+        net_profit_yoy = latest_finance.get('扣非净利润同比增长', 0)
+        industry_rank = basic_info.get('行业排名', 999)
+        industry_total = basic_info.get('行业总家数', 1000)
 
         status_text.text("5/8 正在加载筹码分布数据...")
         progress_bar.progress(65)
@@ -557,7 +614,7 @@ if run_button and stock_code_input:
         status_text.text("6/8 正在执行全维度审计打分...")
         progress_bar.progress(80)
         macro_score, macro_detail, macro_red = macro_audit_fast(market_data, index_data)
-        industry_score, industry_detail, industry_red = industry_audit_fast(industry_name, industry_flow_df, hot_industry)
+        industry_score, industry_detail, industry_red = industry_audit_fast(industry_name, industry_flow_df, hot_industry, basic_info)
         company_score, company_detail, company_red = company_audit_fast(st.session_state.stock_code, financial_data, basic_info)
         chip_score, chip_detail, chip_red = chip_audit_fast(chip_data, chip_df, kline_df, st.session_state.stock_code)
         technical_score, technical_detail = technical_audit_fast(kline_df)
@@ -618,7 +675,7 @@ if run_button and stock_code_input:
         else:
             final_command = "重仓"
 
-        # 所有数据持久化到会话状态
+        # 所有数据持久化到会话状态（渲染时只用这里的安全数据）
         st.session_state.audit_data = {
             "final_total_score": final_total_score,
             "privilege_bonus": privilege_bonus,
@@ -651,12 +708,23 @@ if run_button and stock_code_input:
             "fund_activity_detail": fund_activity_detail,
             "odds_score": odds_score,
             "odds_detail": odds_detail,
-            "market_data": market_data,
+            # 预计算好的安全渲染数据（彻底解决0值问题）
+            "trade_amount": trade_amount,
+            "north_flow": north_flow,
+            "limit_up_count": limit_up_count,
+            "limit_down_count": limit_down_count,
             "hot_industry": hot_industry,
             "industry_name": industry_name,
+            "industry_flow_5d": industry_flow_5d,
             "basic_info": basic_info,
             "financial_data": financial_data,
-            "kline_df": kline_df
+            "kline_df": kline_df,
+            "current_close": current_close,
+            "net_profit_yoy": net_profit_yoy,
+            "industry_rank": industry_rank,
+            "industry_total": industry_total,
+            "chip_data": chip_data,
+            "chip_df": chip_df
         }
         st.session_state.load_finished = True
 
@@ -695,26 +763,28 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
 
     st.divider()
 
-    # II. 战术执行方案
+    # II. 战术执行方案（彻底解决0值问题）
     st.subheader("II. 战术执行方案（精简核心·极致精准）")
     st.caption("⚠️ 【执行铁律】仅双准入校验通过、无红线触发的标的可执行；崩塌期/红线触发标的直接空仓拉黑，严禁操作。")
     col_tactics_1, col_tactics_2 = st.columns(2)
 
     support = data['odds_detail']['support']
     pressure = data['odds_detail']['pressure']
-    current_close = data['kline_df'].iloc[-1]['收盘'] if not data['kline_df'].empty else 0
+    current_close = data['current_close']
 
     with col_tactics_1:
         st.subheader("精准进场点位")
-        st.write(f"- **首仓进场位**：{round(support*1.01, 2)}元（20日均线/筹码峰上沿强支撑）")
+        first_entry = round(support*1.01, 2) if support !=0 else "数据获取异常"
+        add_entry = round(pressure*0.99, 2) if pressure !=0 else "数据获取异常"
+        st.write(f"- **首仓进场位**：{first_entry}元（20日均线/筹码峰上沿强支撑）")
         st.write(f"  触发条件：回踩支撑不破+L2盘口大单承接，仓位：计划总仓位的50%")
-        st.write(f"- **加仓进场位**：{round(pressure*0.99, 2)}元（前高/关键压力位）")
+        st.write(f"- **加仓进场位**：{add_entry}元（前高/关键压力位）")
         st.write(f"  触发条件：放量突破（量比≥2）+L2资金持续流入，仓位：计划总仓位的50%")
         st.write("- **进场禁忌**：无承接高位追涨、支撑破位后反抽进场，0仓位")
 
         st.subheader("极限反向博弈（仅高确定性场景适配）")
         st.caption("⚠️ 【准入前提】必须同时满足：三维+L2全达标、赛道为市场主线、底部筹码100%锁定、仅大盘/板块情绪错杀、处于潜伏期/主升期，缺一不可")
-        panic_support = round(support*0.92, 2)
+        panic_support = round(support*0.92, 2) if support !=0 else "数据获取异常"
         st.write(f"- **博弈进场位**：{panic_support}元（恐慌杀跌强支撑位/黄金分割0.618位）")
         st.write(f"  触发条件：杀跌末端放量止跌+大单承接")
         st.write("- **仓位限制**：不超过总仓位的20%，仅小仓位博弈")
@@ -725,36 +795,34 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
         st.subheader("止盈止损铁律")
         st.subheader("止盈规则")
         first_pressure = round(current_close*1.1, 2) if pressure ==0 else round(pressure*0.8, 2)
-        st.write(f"- **第一止盈位**：{first_pressure}元（第一压力位/套牢盘密集区），触发：触及后放量滞涨，兑现50%仓位")
+        st.write(f"- **第一止盈位**：{round(first_pressure, 2)}元（第一压力位/套牢盘密集区），触发：触及后放量滞涨，兑现50%仓位")
         st.write(f"- **终极止盈位**：{round(pressure, 2)}元（估值目标位/板块情绪顶），触发：底部筹码松动+L2主力净流出，清仓")
         st.write("- **移动止盈保护**：以20日均线为生命线，有效跌破且当日无法收回，直接清仓")
 
         st.subheader("止损规则")
-        stop_loss = round(support*0.92, 2)
+        stop_loss = round(support*0.92, 2) if support !=0 else "数据获取异常"
         st.write(f"- **技术止损位**：{stop_loss}元（底部筹码峰下沿/进场位最大回撤8%），有效跌破无条件清仓，单笔亏损不超总资金2%")
         st.write("- **逻辑止损**：触发任意死刑红线/公司出现重大基本面利空，当日无条件清仓，永久拉黑")
 
     st.divider()
 
-    # III. 底层逻辑一句话速览
+    # III. 底层逻辑一句话速览（彻底解决0值问题）
     st.subheader("III. 底层逻辑一句话速览（强制精准落地）")
-    market_data = data['market_data']
-    trade_amount = market_data.get('trade_amount', pd.DataFrame()).iloc[0]['两市成交额'] if not market_data.get('trade_amount', pd.DataFrame()).empty else 0
-    north_flow = market_data.get('north_flow', pd.DataFrame()).iloc[-1]['净流入'] if not market_data.get('north_flow', pd.DataFrame()).empty else 0
-    limit_up_count = len(market_data.get('limit_up', pd.DataFrame()))
-    limit_down_count = len(market_data.get('limit_down', pd.DataFrame()))
-    macro_desc = f"前一日两市成交额{round(trade_amount/100000000, 2)}亿元，北向资金净流入{round(north_flow/100000000, 2)}亿元，全市场涨停{limit_up_count}家，跌停{limit_down_count}家，核心指数{'站稳120日线，货币政策宽松无收紧预期' if data['macro_score']>=6 else '跌破120日线，存在系统性风险'}，市场主线为{','.join(data['hot_industry'][:3])}"
+    trade_amount = data['trade_amount']
+    north_flow = data['north_flow']
+    limit_up_count = data['limit_up_count']
+    limit_down_count = data['limit_down_count']
+    macro_desc = f"前一日两市成交额{safe_round(trade_amount/100000000, 2)}亿元，北向资金净流入{safe_round(north_flow/100000000, 2)}亿元，全市场涨停{limit_up_count}家，跌停{limit_down_count}家，核心指数{'站稳120日线，货币政策宽松无收紧预期' if data['macro_score']>=6 else '跌破120日线，存在系统性风险'}，市场主线为{','.join(data['hot_industry'][:3])}"
     st.write(f"- **大盘情况**：{macro_desc}")
 
-    industry_flow_5d = get_industry_fund_flow_cached(data['industry_name']).iloc[0]['5日净流入-净额'] if not get_industry_fund_flow_cached(data['industry_name']).empty else 0
-    industry_desc = f"所属{data['industry_name']}赛道，{'为当前市场TOP3热门主线' if data['industry_name'] in data['hot_industry'] else '非市场热门主线'}，近5日板块主力资金累计净流入{round(industry_flow_5d/100000000, 2)}亿元，行业景气度{'持续上行' if data['industry_score']>=12 else '平稳/下行'}，市场认可度{'极高' if data['industry_name'] in data['hot_industry'] else '一般'}"
+    industry_flow_5d = data['industry_flow_5d']
+    industry_desc = f"所属{data['industry_name']}赛道，{'为当前市场TOP3热门主线' if data['industry_name'] in data['hot_industry'] else '非市场热门主线'}，近5日板块主力资金累计净流入{safe_round(industry_flow_5d/100000000, 2)}亿元，行业景气度{'持续上行' if data['industry_score']>=12 else '平稳/下行'}，市场认可度{'极高' if data['industry_name'] in data['hot_industry'] else '一般'}"
     st.write(f"- **赛道情况**：{industry_desc}")
 
-    industry_rank = data['basic_info'].get('行业排名', 999)
-    industry_total = data['basic_info'].get('行业总家数', 1000)
-    financial_df = data['financial_data'].get('financial', pd.DataFrame())
-    net_profit_yoy = financial_df.iloc[0]['扣非净利润同比增长'] if not financial_df.empty else 0
-    company_desc = f"公司为{data['industry_name']}行业排名第{industry_rank}/{industry_total}，核心上涨驱动为{'业绩增长' if net_profit_yoy>0 else '行业题材'}，最新报告期扣非净利润同比增长{net_profit_yoy}%，{'无重大利空风险' if data['company_score']>=6 else '存在经营/治理风险'}"
+    industry_rank = data['industry_rank']
+    industry_total = data['industry_total']
+    net_profit_yoy = data['net_profit_yoy']
+    company_desc = f"公司为{data['industry_name']}行业排名第{industry_rank}/{industry_total}，核心上涨驱动为{'业绩增长' if net_profit_yoy>0 else '行业题材'}，最新报告期扣非净利润同比增长{safe_round(net_profit_yoy, 2)}%，{'无重大利空风险' if data['company_score']>=6 else '存在经营/治理风险'}"
     st.write(f"- **公司情况**：{company_desc}")
 
     st.divider()
@@ -762,22 +830,22 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
     # IV. 分维度详细审计说明（懒加载，点击展开才显示）
     st.subheader("IV. 分维度详细审计说明（强制细化无笼统）")
     with st.expander("1. 宏观大盘维度审计（满分10分，得分{}分）".format(data['macro_score']), expanded=False):
-        st.write(f"【市场全景与核心主线】：当前A股核心指数{'站稳120日线，呈多头趋势' if data['macro_detail']['market_env']>=2 else '跌破120日线，呈空头趋势'}，两市成交额{round(trade_amount/100000000, 2)}亿元，市场核心炒作主线为{','.join(data['hot_industry'][:5])}，全市场资金{'整体净流入' if market_data.get('market_flow', pd.DataFrame()).iloc[0]['主力净流入-净额']>0 else '整体净流出'}")
-        st.write(f"【利好驱动明细】：北向资金净流入{round(north_flow/100000000, 2)}亿元，市场主线板块持续活跃，涨停家数{limit_up_count}家，市场情绪平稳，无重大地缘/政策利空")
-        st.write(f"【利空风险明细】：跌停家数{limit_down_count}家，{'主力资金整体净流出' if market_data.get('market_flow', pd.DataFrame()).iloc[0]['主力净流入-净额']<0 else '无重大资金流出风险'}，{'大盘跌破120日线，存在系统性下跌风险' if data['macro_red'] else '无系统性风险'}")
+        st.write(f"【市场全景与核心主线】：当前A股核心指数{'站稳120日线，呈多头趋势' if data['macro_detail']['market_env']>=2 else '跌破120日线，呈空头趋势'}，两市成交额{safe_round(trade_amount/100000000, 2)}亿元，市场核心炒作主线为{','.join(data['hot_industry'][:5])}，全市场资金{'整体净流入' if safe_iloc(data.get('market_data', {}).get('market_flow', pd.DataFrame()), 0).get('主力净流入-净额', 0)>0 else '整体净流出'}")
+        st.write(f"【利好驱动明细】：北向资金净流入{safe_round(north_flow/100000000, 2)}亿元，市场主线板块持续活跃，涨停家数{limit_up_count}家，市场情绪平稳，无重大地缘/政策利空")
+        st.write(f"【利空风险明细】：跌停家数{limit_down_count}家，{'主力资金整体净流出' if safe_iloc(data.get('market_data', {}).get('market_flow', pd.DataFrame()), 0).get('主力净流入-净额', 0)<0 else '无重大资金流出风险'}，{'大盘跌破120日线，存在系统性下跌风险' if data['macro_red'] else '无系统性风险'}")
         st.write(f"红线排查：{'是' if data['macro_red'] else '否'}触发一票否决条款")
 
     with st.expander("2. 行业赛道维度审计（满分20分，得分{}分）".format(data['industry_score']), expanded=False):
         st.write(f"【赛道定位与热门度评级】：{data['industry_name']}赛道，全市场热门度排名{data['hot_industry'].index(data['industry_name'])+1 if data['industry_name'] in data['hot_industry'] else '未进前10'}，行业景气度{'上行周期' if data['industry_detail']['boom']>=4 else '平稳/下行周期'}，板块整体走势{'呈上升趋势' if industry_flow_5d>0 else '横盘/下行趋势'}")
         st.write(f"【热门核心底层逻辑】：{'行业需求扩张、资金持续流入，为市场主线题材' if data['industry_name'] in data['hot_industry'] else '非市场主线，资金关注度低，无持续上涨逻辑'}")
-        st.write(f"【利好催化明细】：近5日板块主力资金净流入{round(industry_flow_5d/100000000, 2)}亿元，{'为市场热门主线，板块效应强' if data['industry_name'] in data['hot_industry'] else '无重大利好催化'}")
+        st.write(f"【利好催化明细】：近5日板块主力资金净流入{safe_round(industry_flow_5d/100000000, 2)}亿元，{'为市场热门主线，板块效应强' if data['industry_name'] in data['hot_industry'] else '无重大利好催化'}")
         st.write(f"【利空风险明细】：{'行业景气度下行，资金持续流出' if data['industry_red'] else '无行业性利空风险'}")
         st.write(f"红线排查：{'是' if data['industry_red'] else '否'}触发一票否决条款")
 
     with st.expander("3. 公司基本面维度审计（满分10分，得分{}分）".format(data['company_score']), expanded=False):
         st.write(f"【公司核心定位】：{data['basic_info'].get('股票简称', st.session_state.stock_code)}，{data['industry_name']}行业排名第{industry_rank}/{industry_total}，核心竞争力{'为行业龙头，具备品牌/技术壁垒' if data['company_detail']['moat']>=2 else '无明显核心壁垒'}")
         st.write(f"【热门/上涨核心驱动逻辑】：{'业绩持续增长，行业龙头地位稳固' if data['company_score']>=6 else '行业题材炒作，无基本面支撑'}")
-        st.write(f"【落地式利好明细】：最新报告期扣非净利润同比增长{net_profit_yoy}%，经营现金流{'为正，盈利质量良好' if data['company_detail']['profit']>=3 else '为负，盈利质量较差'}，股权质押比例低，无重大治理风险")
+        st.write(f"【落地式利好明细】：最新报告期扣非净利润同比增长{safe_round(net_profit_yoy, 2)}%，经营现金流{'为正，盈利质量良好' if data['company_detail']['profit']>=3 else '为负，盈利质量较差'}，股权质押比例低，无重大治理风险")
         st.write(f"【利空风险明细】：{'行业排名靠后，无核心护城河' if data['company_detail']['moat']==0 else '无重大利空风险'}，{'股权质押比例过高' if data['company_detail']['governance']==0 else '无治理风险'}")
         st.write(f"红线排查：{'是' if data['company_red'] else '否'}触发一票否决条款")
 
@@ -787,7 +855,7 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
         st.write(f"红线排查：{'是' if st.session_state.l2_red_line else '否'}触发死刑条款")
 
     with st.expander("5. 筹码结构审计（满分20分，得分{}分）".format(data['chip_score']), expanded=False):
-        st.write(f"核心分析：筹码形态{'为单峰密集，集中度高' if data['chip_detail']['shape']>=8 else '为多峰发散，集中度低'}，底部筹码{'锁定良好，无松动' if data['chip_detail']['lock']>=6 else '松动明显，主力派发'}，当前获利比例{get_chip_distribution_cached(st.session_state.stock_code)[0].get('获利比例', 0)}%，90%成本集中度{get_chip_distribution_cached(st.session_state.stock_code)[0].get('90%成本集中度', 100)}%，{'筹码结构健康，拉升抛压小' if data['chip_score']>=15 else '筹码结构较差，拉升抛压大'}")
+        st.write(f"核心分析：筹码形态{'为单峰密集，集中度高' if data['chip_detail']['shape']>=8 else '为多峰发散，集中度低'}，底部筹码{'锁定良好，无松动' if data['chip_detail']['lock']>=6 else '松动明显，主力派发'}，当前获利比例{data['chip_data'].get('获利比例', 0)}%，90%成本集中度{data['chip_data'].get('90%成本集中度', 100)}%，{'筹码结构健康，拉升抛压小' if data['chip_score']>=15 else '筹码结构较差，拉升抛压大'}")
         st.write(f"红线排查：{'是' if data['chip_red'] else '否'}触发筹码诈骗死刑条款")
 
     with st.expander("6. 技术环境审计（满分8分，得分{}分）".format(data['technical_score']), expanded=False):
@@ -795,15 +863,19 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
         st.write(f"风险提示：{'无' if data['technical_score']>=4 else '趋势破位预警/牛熊线下方风险'}")
 
     with st.expander("7. 排雷安全审计（满分7分，得分{}分）".format(data['risk_score']), expanded=False):
-        st.write(f"核心分析：商誉占净资产比例{round(data['financial_data'].get('goodwill_df', pd.DataFrame()).iloc[0]['商誉']/data['financial_data'].get('goodwill_df', pd.DataFrame()).iloc[0]['所有者权益合计']*100 if not data['financial_data'].get('goodwill_df', pd.DataFrame()).empty else 0)}%，流通市值{round(data['basic_info'].get('流通市值', 0)/100000000, 2)}亿元，{'无商誉风险，市值适配性良好' if data['risk_score']>=5 else '存在高商誉/微盘股流动性风险'}")
+        goodwill_ratio = safe_round(safe_iloc(data['financial_data'].get('goodwill', pd.DataFrame()), 0).get('商誉', 0)/safe_iloc(data['financial_data'].get('goodwill', pd.DataFrame()), 0).get('所有者权益合计', 1)*100, 2)
+        circulate_market_cap = safe_round(data['basic_info'].get('流通市值', 0)/100000000, 2)
+        st.write(f"核心分析：商誉占净资产比例{goodwill_ratio}%，流通市值{circulate_market_cap}亿元，{'无商誉风险，市值适配性良好' if data['risk_score']>=5 else '存在高商誉/微盘股流动性风险'}")
         st.write(f"风险提示：{'无' if data['risk_score']>=5 else '高商誉预警/微盘股流动性风险'}")
 
     with st.expander("8. 资金活性审计（满分5分，得分{}分）".format(data['fund_activity_score']), expanded=False):
-        st.write(f"核心分析：最新量比{round(data['kline_df'].iloc[-1]['成交量']/data['kline_df'].iloc[-20:-1]['成交量'].mean(), 2)}，换手率{round(data['kline_df'].iloc[-1]['换手率'], 2)}%，盘口承接力{'强' if data['fund_activity_detail']['attack']>=3 else '弱'}，高位套牢盘{'无明显压力' if data['fund_activity_detail']['purity']>=2 else '压力较大'}，个股与板块量能匹配度{'高' if data['fund_activity_score']>=3 else '低'}")
+        volume_ratio = safe_round(safe_iloc(data['kline_df'], -1).get('成交量', 0)/data['kline_df'].iloc[-20:-1]['成交量'].mean() if len(data['kline_df'])>=20 else 0, 2)
+        turnover_rate = safe_round(safe_iloc(data['kline_df'], -1).get('换手率', 0), 2)
+        st.write(f"核心分析：最新量比{volume_ratio}，换手率{turnover_rate}%，盘口承接力{'强' if data['fund_activity_detail']['attack']>=3 else '弱'}，高位套牢盘{'无明显压力' if data['fund_activity_detail']['purity']>=2 else '压力较大'}，个股与板块量能匹配度{'高' if data['fund_activity_score']>=3 else '低'}")
         st.write(f"风险提示：{'无' if data['fund_activity_score']>=3 else '量能不足预警/高位套牢盘压力预警'}")
 
     with st.expander("9. 赔率决策审计（满分5分，得分{}分）".format(data['odds_score']), expanded=False):
-        st.write(f"核心分析：当前价格{round(current_close, 2)}元，强支撑位{data['odds_detail']['support']}元，强压力位{data['odds_detail']['pressure']}元，赔率R值{data['odds_detail']['r_value']}，{'盈亏比极佳，具备高交易性价比' if data['odds_score']>=3 else '盈亏比不足，不具备交易价值'}")
+        st.write(f"核心分析：当前价格{safe_round(current_close, 2)}元，强支撑位{data['odds_detail']['support']}元，强压力位{data['odds_detail']['pressure']}元，赔率R值{data['odds_detail']['r_value']}，{'盈亏比极佳，具备高交易性价比' if data['odds_score']>=3 else '盈亏比不足，不具备交易价值'}")
         st.write(f"风险提示：{'无' if data['odds_score']>=3 else '赔率不足预警，不具备交易价值'}")
 
     st.divider()
@@ -817,4 +889,4 @@ if st.session_state.load_finished and st.session_state.audit_data is not None:
     st.write(f"- 终极排查结论：{'逻辑崩塌，总分清零，永久拉黑' if data['death_trigger'] else '安全无红线'}")
 
 st.divider()
-st.caption("Depp·鹰眼 MRI 审计子系统 v1.9 终版 | 隶属乾元·太初全维度量化作战母系统")
+st.caption("Depp·鹰眼 MRI 审计子系统 v1.9 终版 | 隶属乾元·太初全维度量化作战母系统 | 异常兜底修复版")
