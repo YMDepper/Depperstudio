@@ -2,332 +2,166 @@ import streamlit as st
 import requests
 from streamlit_autorefresh import st_autorefresh
 
-# ===================== 1. 全局配置 =====================
+# ===================== 全局配置（同花顺风格） =====================
 st.set_page_config(
-    page_title="鹰眼股票诊断",
+    page_title="鹰眼自选行情",
     layout="wide",
-    initial_sidebar_state="collapsed",
-    menu_items=None
+    initial_sidebar_state="collapsed"
 )
 
-# 强制移动端适配
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
-# ✅ 5秒自动刷新（仅触发局部数据更新，不闪屏）
-st_autorefresh(interval=5000, limit=None, key="local_refresh")
+# 自动刷新 5秒（无闪烁）
+st_autorefresh(interval=5000, limit=None, key="auto_refresh_final")
 
-# 初始化股票池
+# 初始化自选股
 if 'stock_pool' not in st.session_state:
-    st.session_state.stock_pool = ["sh600111", "sz002428", "sh600137"]
+    st.session_state.stock_pool = [
+        "sz002364", "sh603986", "sh600410", "sz001896",
+        "sh600566", "sz000988", "sh603629", "sz002463"
+    ]
 
-# ===================== 2. 最终UI样式（卡片底色+无闪烁优化） =====================
+# ===================== 同花顺极简样式（1:1复刻） =====================
 st.markdown("""
 <style>
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        -webkit-font-smoothing: antialiased;
-        -webkit-text-size-adjust: 100%;
-        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    body, .stApp {
+        background-color: #ffffff !important;
+        color: #111111;
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
     }
-
-    .stApp {
-        background-color: #0a0a0a;
-        color: #ffffff;
-        padding: 12px 16px !important;
-        max-width: 100vw !important;
-        overflow-x: hidden !important;
-    }
-
     #MainMenu, header, footer {visibility: hidden;}
-    .block-container {padding: 0 !important; max-width: 100% !important;}
-    .stVerticalBlock {gap: 0 !important;}
+    .block-container {padding: 12px 10px !important; max-width: 100% !important;}
 
-    .stButton button {
-        width: 44px !important;
-        height: 44px !important;
-        background-color: #2c2c2e !important;
-        border-radius: 10px !important;
-        border: none !important;
-        color: #ffffff !important;
-        font-size: 22px !important;
-        font-weight: 600 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        position: absolute !important;
-        top: 16px !important;
-        right: 16px !important;
-        z-index: 999 !important;
-    }
-    .stButton button:hover {background-color: #3a3a3c !important;}
-
-    /* ✅ 独立卡片底色+阴影+圆角，视觉强区分 */
-    .stock-card {
-        position: relative;
-        width: 100% !important;
-        background-color: #1c1c1e;  /* 比主背景亮一级的卡片底色 */
-        border-radius: 16px;
-        padding: 18px 16px 14px 16px;
-        margin-bottom: 12px !important;
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-    }
-
-    /* 左侧信号边（和卡片等高） */
-    .signal-border {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 6px;
-        height: 100%;
-        border-radius: 16px 0 0 16px;
-        z-index: 1;
-    }
-    .signal-buy {background: linear-gradient(180deg, #ff3b30, #ff2d55);}
-    .signal-sell {background: linear-gradient(180deg, #34c759, #30d158);}
-
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        width: 100%;
-        margin-bottom: 16px;
-        padding-left: 10px; /* 给左侧信号边留空间 */
-        padding-right: 50px;
-    }
-
-    .header-left {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        max-width: 55%;
-    }
-    .name-row {
+    /* 整行容器：和同花顺一样的单行布局 */
+    .stock-row {
         display: flex;
         align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
+        justify-content: space-between;
+        height: 56px;
+        padding: 0 10px;
+        border-bottom: 1px solid #f2f2f2;
     }
-    .score-badge {
-        background-color: #ff3b30;
-        border-radius: 12px;
-        padding: 6px 14px;
-        font-size: 20px;
-        font-weight: 800;
-        color: #ffffff;
-        white-space: nowrap;
+
+    /* 左侧：竖线 + 名称 + 代码 */
+    .row-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .line-tag {
+        width: 3px;
+        height: 24px;
+        border-radius: 2px;
+        background-color: #ff4444;
+    }
+    .name-area {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .stock-name {
-        font-size: 28px;
-        font-weight: 800;
-        color: #ffffff;
-        line-height: 1.1;
+        font-size: 17px;
+        font-weight: 500;
+        color: #111;
     }
     .stock-code {
-        font-size: 16px;
-        color: #8e8e93;
-        font-weight: 500;
-    }
-
-    .header-right {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 6px;
-        max-width: 40%;
-    }
-    .main-price {
-        font-size: 32px;
-        font-weight: 900;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-    }
-    .price-change {
-        background-color: #3a1a1a;
-        border-radius: 8px;
-        padding: 4px 10px;
-        font-size: 18px;
-        font-weight: 700;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-    }
-
-    .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 8px;
-        width: 100%;
-        padding-left: 10px; /* 和头部对齐 */
-    }
-    .metric-item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        min-width: 0;
-    }
-    .metric-value {
-        font-size: 20px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-        margin-bottom: 4px;
-        white-space: nowrap;
-    }
-    .metric-label {
         font-size: 13px;
-        color: #8e8e93;
+        color: #888;
+    }
+
+    /* 中间：现价 */
+    .row-price {
+        font-size: 18px;
         font-weight: 500;
-        line-height: 1.2;
-        white-space: nowrap;
+        text-align: center;
     }
 
-    .up-color {color: #ff3b30;}
-    .down-color {color: #34c759;}
+    /* 右侧：涨幅 */
+    .row-change {
+        font-size: 17px;
+        font-weight: 500;
+        min-width: 70px;
+        text-align: right;
+        border-radius: 4px;
+        padding: 3px 6px;
+    }
 
-    .search-box {
-        width: 100%;
-        margin-bottom: 20px;
+    /* 涨跌颜色 */
+    .up {color: #f23c32;}
+    .down {color: #02b262;}
+
+    /* 搜索栏 */
+    .search-input input {
+        height: 40px !important;
+        border-radius: 8px !important;
+        background: #f5f5f5 !important;
+        border: none !important;
     }
-    .stTextInput {width: 100% !important;}
-    .stTextInput input {
-        width: 100% !important;
-        height: 48px;
-        background-color: #17171a;
-        border: 1px solid #2c2c2e;
-        border-radius: 12px;
-        padding: 0 16px;
-        color: #ffffff;
-        font-size: 16px;
-    }
-    .stTextInput input::placeholder {color: #8e8e93;}
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== 3. 顶部固定区域（永远不刷新，彻底解决闪烁） =====================
-st.title("📈 鹰眼MRI · 股票卡片对比系统")
-col_input, col_clear = st.columns([0.8, 0.2])
-with col_input:
-    new_stock = st.text_input(
-        "",
-        placeholder="🔍 输入股票代码（回车添加）",
-        label_visibility="collapsed"
-    )
-    if new_stock:
-        code_input = new_stock.strip().lower()
-        if len(code_input) == 6:
-            code_input = "sh" + code_input if code_input.startswith(('6', '9')) else "sz" + code_input
-        if code_input not in st.session_state.stock_pool:
-            st.session_state.stock_pool.insert(0, code_input)
-            st.rerun()
-
-with col_clear:
+# ===================== 顶部搜索添加（同花顺风格） =====================
+col_add, col_btn = st.columns([4, 1])
+with col_add:
+    new_code = st.text_input("", placeholder="输入股票代码添加", label_visibility="collapsed")
+with col_btn:
     if st.button("清空", use_container_width=True):
         st.session_state.stock_pool = []
         st.rerun()
 
+# 添加逻辑
+if new_code and len(new_code.strip()) == 6:
+    code = new_code.strip().lower()
+    code = "sh" + code if code.startswith(('6', '9')) else "sz" + code
+    if code not in st.session_state.stock_pool:
+        st.session_state.stock_pool.append(code)
+        st.rerun()
+
 st.divider()
 
-# ===================== 4. 数据获取 =====================
+# ===================== 数据接口 =====================
 @st.cache_data(ttl=3)
-def get_stock_data(code):
+def get_price(code):
     try:
-        response = requests.get(f"https://qt.gtimg.cn/q={code}", timeout=2)
-        response.encoding = "gbk"
-        raw_data = response.text.split("~")
-        
-        if len(raw_data) < 40:
+        res = requests.get(f"https://qt.gtimg.cn/q={code}", timeout=2)
+        res.encoding = "gbk"
+        arr = res.text.split("~")
+        if len(arr) < 40:
             return None
-        
-        stock_name = raw_data[1]
-        current_price = raw_data[3]
-        yesterday_close = float(raw_data[4])
-        open_price = float(raw_data[5])
-        high_price = raw_data[33]
-        change_percent = float(raw_data[32]) if raw_data[32] else 0.0
-        
-        open_premium = round((open_price - yesterday_close) / yesterday_close * 100, 2)
-        intraday_entity = round((float(current_price) - open_price) / open_price * 100, 2)
-        target_price = round(yesterday_close * 1.1, 2)
-        
-        is_buy_signal = change_percent >= 0
-        
         return {
-            "name": stock_name,
-            "code": code,
-            "short_code": code.replace("sh", "").replace("sz", ""),
-            "price": current_price,
-            "change": change_percent,
-            "open_premium": open_premium,
-            "intraday_entity": intraday_entity,
-            "high_price": high_price,
-            "target_price": target_price,
-            "score": 90,
-            "is_buy": is_buy_signal
+            "name": arr[1],
+            "code": code[2:],
+            "price": arr[3],
+            "change": float(arr[32])
         }
     except:
         return None
 
-# ===================== 5. ✅ 局部数据刷新容器（只有这里会更新，完全不闪） =====================
-data_container = st.empty()
-
-with data_container.container():
-    for stock_code in st.session_state.stock_pool:
-        stock_info = get_stock_data(stock_code)
-        if not stock_info:
-            st.warning(f"⚠️ {stock_code} 数据获取失败，请检查代码")
+# ===================== 渲染：同花顺列表布局（核心） =====================
+view = st.container()
+with view:
+    for code in st.session_state.stock_pool:
+        data = get_price(code)
+        if not data:
             continue
-        
-        is_up = stock_info["change"] >= 0
-        text_color = "up-color" if is_up else "down-color"
-        signal_class = "signal-buy" if stock_info["is_buy"] else "signal-sell"
-        
-        with st.container():
-            st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="signal-border {signal_class}"></div>', unsafe_allow_html=True)
-            
-            if st.button("✕", key=f"del_{stock_code}"):
-                st.session_state.stock_pool.remove(stock_code)
-                st.rerun()
-            
-            st.markdown(f"""
-            <div class="card-header">
-                <div class="header-left">
-                    <div class="name-row">
-                        <span class="score-badge">评分 {stock_info['score']}</span>
-                        <span class="stock-name">{stock_info['name']}</span>
-                    </div>
-                    <div class="stock-code">{stock_info['short_code']}</div>
-                </div>
-                <div class="header-right">
-                    <div class="main-price {text_color}">{stock_info['price']}</div>
-                    <div class="price-change {text_color}">{stock_info['change']}%</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="metrics-grid">
-                <div class="metric-item">
-                    <div class="metric-value {text_color}">{stock_info['open_premium']}%</div>
-                    <div class="metric-label">开盘溢价</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value up-color">{stock_info['intraday_entity']}%</div>
-                    <div class="metric-label">盘中实体</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value">{stock_info['high_price']}</div>
-                    <div class="metric-label">今日最高</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value up-color">{stock_info['target_price']}</div>
-                    <div class="metric-label">目标价</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div style="height: 80px;"></div>', unsafe_allow_html=True)
+        # 颜色
+        color = "up" if data["change"] >= 0 else "down"
+
+        # 单行布局 = 左(竖线+名称+代码) + 中(价格) + 右(涨幅)
+        st.markdown(f"""
+        <div class="stock-row">
+            <div class="row-left">
+                <div class="line-tag"></div>
+                <div class="name-area">
+                    <div class="stock-name">{data['name']}</div>
+                    <div class="stock-code">{data['code']}</div>
+                </div>
+            </div>
+            <div class="row-price {color}">{data['price']}</div>
+            <div class="row-change {color}">{data['change']}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# 底部留白
+st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
