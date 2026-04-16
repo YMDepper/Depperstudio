@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+from streamlit_autorefresh import st_autorefresh
 
 # ===================== 1. 全局配置 =====================
 st.set_page_config(
@@ -12,11 +13,14 @@ st.set_page_config(
 # 强制移动端适配
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
+# ✅ 官方自动刷新：5秒一次，稳定无死循环
+st_autorefresh(interval=5000, limit=None, key="auto_refresh_final")
+
 # 初始化股票池
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sh600111", "sz002428", "sh600137"]
 
-# ===================== 2. iPhone专属UI样式 =====================
+# ===================== 2. iPhone专属UI样式（优化紧凑版） =====================
 st.markdown("""
 <style>
     * {
@@ -58,12 +62,13 @@ st.markdown("""
     }
     .stButton button:hover {background-color: #3a3a3c !important;}
 
+    /* ✅ 优化卡片高度，移除诊断框后更紧凑 */
     .stock-card {
         position: relative;
         width: 100% !important;
         border-radius: 20px;
         background-color: #17171a;
-        padding: 20px 16px 16px 16px;
+        padding: 20px 16px 12px 16px;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     }
@@ -84,7 +89,7 @@ st.markdown("""
         justify-content: space-between;
         align-items: flex-start;
         width: 100%;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
         padding-right: 50px;
     }
 
@@ -145,32 +150,11 @@ st.markdown("""
         white-space: nowrap;
     }
 
-    .diagnosis-box {
-        width: 100%;
-        background-color: #1e293b;
-        border-radius: 16px;
-        border-left: 6px solid #3b82f6;
-        padding: 16px 20px;
-        margin: 16px 0;
-    }
-    .diagnosis-title {
-        color: #60a5fa;
-        font-size: 18px;
-        font-weight: 800;
-    }
-    .diagnosis-text {
-        color: #ffffff;
-        font-size: 18px;
-        line-height: 1.6;
-        margin-top: 4px;
-    }
-
     .metrics-grid {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 6px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
         width: 100%;
-        margin-bottom: 16px;
     }
     .metric-item {
         display: flex;
@@ -239,20 +223,13 @@ with col_clear:
         st.session_state.stock_pool = []
         st.rerun()
 
-# 手动刷新按钮（替代自动刷新，彻底解决死循环）
-refresh_btn = st.button("🔄 刷新最新数据", type="primary", use_container_width=True)
-if refresh_btn:
-    st.cache_data.clear()
-    st.rerun()
-
 st.divider()
 
-# ===================== 4. 数据获取（修复HTTPS问题） =====================
-@st.cache_data(ttl=60)  # 缓存1分钟，手动点击刷新
+# ===================== 4. 数据获取（HTTPS稳定版） =====================
+@st.cache_data(ttl=3)
 def get_stock_data(code):
     try:
-        # ✅ 改用HTTPS接口，彻底解决混合内容拦截
-        response = requests.get(f"https://qt.gtimg.cn/q={code}", timeout=3)
+        response = requests.get(f"https://qt.gtimg.cn/q={code}", timeout=2)
         response.encoding = "gbk"
         raw_data = response.text.split("~")
         
@@ -288,7 +265,7 @@ def get_stock_data(code):
     except:
         return None
 
-# ===================== 5. 股票卡片渲染 =====================
+# ===================== 5. 股票卡片渲染（无诊断推演版） =====================
 for stock_code in st.session_state.stock_pool:
     stock_info = get_stock_data(stock_code)
     if not stock_info:
@@ -323,13 +300,7 @@ for stock_code in st.session_state.stock_pool:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown(f"""
-        <div class="diagnosis-box">
-            <span class="diagnosis-title">🎯✈️ 诊断推演：</span>
-            <span class="diagnosis-text">属于典型的反核博弈信号。资金逆势扫货迹象明显，关注午后承接力度。</span>
-        </div>
-        """, unsafe_allow_html=True)
-        
+        # ✅ 指标网格（4列，更紧凑）
         st.markdown(f"""
         <div class="metrics-grid">
             <div class="metric-item">
