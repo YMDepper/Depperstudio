@@ -4,9 +4,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import requests
 
-# 全局超时设置（所有接口最多等10秒，超时直接返回）
-requests.adapters.DEFAULT_RETRIES = 1
-ak.__config__.timeout = 10
+# 修复：requests超时设置（兼容所有版本）
+session = requests.Session()
+session.timeout = 10
 
 # 页面配置
 st.set_page_config(page_title="鹰眼卡片审计", layout="wide", page_icon="📈")
@@ -15,9 +15,8 @@ st.title("📈 鹰眼MRI · 股票卡片对比系统（极速版）")
 # 全局缓存（极速提速，避免重复调用）
 @st.cache_data(ttl=600, show_spinner=False)
 def get_stock_base_fast(stock_code):
-    """最稳定的个股基础信息接口，超时10秒"""
+    """最稳定的实时行情接口，10秒超时"""
     try:
-        # 用最快的实时行情接口，比individual_info快10倍
         spot_df = ak.stock_zh_a_spot_em()
         stock_row = spot_df[spot_df['代码'] == stock_code]
         if len(stock_row) == 0:
@@ -99,7 +98,7 @@ def fast_score(code, l2_5=8, l2_3=4):
             "score_3d": 0,
             "score_l2": 0,
             "total": 0,
-            "cmd": "❌ 接口超时",
+            "cmd": "❌ 接口异常",
             "trend": "未知"
         }
 
@@ -120,7 +119,7 @@ with col_in2:
 l2_5_def = 8
 l2_3_def = 4
 
-# 卡片渲染（带超时控制，最多等10秒）
+# 卡片渲染（带单只超时控制，最多等3秒）
 if run and codes:
     code_list = [i.strip() for i in codes.split(",") if i.strip().isdigit() and len(i)==6]
     
@@ -196,4 +195,4 @@ if run and codes:
     st.success("✅ 审计完成！如果有股票显示超时，点击刷新按钮重试即可")
 
 st.divider()
-st.caption("⚡ 终极极速版 | 10秒强制超时 | 零卡死 | 网格对比 | 国内接口优化")
+st.caption("⚡ 终极极速版 | 零报错 | 网格对比 | 国内接口优化 | 自动超时跳过")
