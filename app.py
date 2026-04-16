@@ -5,111 +5,139 @@ from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局配置 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
-st_autorefresh(interval=8000, limit=None, key="final_perfect")
+st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
+st_autorefresh(interval=8000, limit=None, key="compact_final")
 
 # 自选股初始化
 if 'stock_pool' not in st.session_state:
-    st.session_state.stock_pool = ["sh600111", "sz002428", "sz002364"]
+    st.session_state.stock_pool = ["sz001896", "sz002364", "sh600111", "sz002428"]
 
-# 热门板块标红
-HOT_SECTORS = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药", "稀土", "有色"]
-
-# ✅ 首字母搜索映射表（补充你常用的即可）
+# 热门板块+首字母映射
+HOT_SECTORS = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药", "稀土", "有色", "电力"]
 STOCK_PY_MAP = {
-    "bfxt":"sh600111", "ynzy":"sz002428", "zhdq":"sz002364",
-    "zycx":"sh603986", "hstc":"sh600410", "ynkg":"sz001896",
-    "jcyy":"sh600566", "hgkj":"sz000988", "ltdz":"sh603629",
-    "hdgf":"sz002463", "htdl":"sh600343", "rjgf":"sz002929"
+    "bfxt":"sh600111", "ynzy":"sz002428", "zhdq":"sz002364", "ynkg":"sz001896",
+    "zycx":"sh603986", "hstc":"sh600410", "jcyy":"sh600566", "hgkj":"sz000988"
 }
 
-# ===================== 最终样式 =====================
+# ===================== 极致紧凑UI（单股2行） =====================
 st.markdown("""
 <style>
     .stApp {background:#f5f5f5;}
     #MainMenu,header,footer {display:none;}
-    .block-container {padding:10px 8px!important;}
+    .block-container {padding:8px 6px!important; max-width:100%!important;}
+    .stVerticalBlock {gap:8px!important;}
 
-    /* 股票卡片 */
+    /* 股票卡片：极致紧凑，单卡高度≈110px */
     .stock-card {
         background:#fff;
-        border-radius:12px;
-        padding:14px;
-        margin-bottom:10px;
+        border-radius:10px;
+        padding:10px 12px;
+        margin-bottom:8px;
+        box-shadow:0 1px 2px rgba(0,0,0,0.05);
     }
 
-    /* ✅ 第一行：名称+代码+现价+涨跌幅 */
-    .row-top {
+    /* 第一行：名称+代码 | 价格+涨跌幅 */
+    .row-1 {
         display:flex;
         justify-content:space-between;
         align-items:center;
-        margin-bottom:12px;
+        margin-bottom:8px;
     }
-    .left-title {
-        display:flex;
-        align-items:center;
-        gap:12px;
-    }
-    .stock-name {font-size:18px; font-weight:600;}
-    .stock-code {font-size:12px; color:#999;}
-    .right-price {
+    .left-info {
         display:flex;
         align-items:center;
         gap:10px;
     }
-    .price {font-size:20px; font-weight:600;}
-    .change {font-size:14px; padding:3px 6px; border-radius:5px;}
+    .stock-name {font-size:16px; font-weight:600; color:#111;}
+    .stock-code {font-size:11px; color:#999;}
+    .right-quote {
+        display:flex;
+        align-items:center;
+        gap:8px;
+    }
+    .price {font-size:18px; font-weight:600;}
+    .change {
+        font-size:13px;
+        padding:2px 6px;
+        border-radius:4px;
+    }
 
-    /* ✅ 第二行：MA5+MA10+资金流+MACD图+板块 */
-    .row-bottom {
+    /* 第二行：MA5+MA10+资金+MACD+板块（全部对齐） */
+    .row-2 {
         display:flex;
         justify-content:space-between;
         align-items:center;
-        border-top:1px solid #f2f2f2;
-        padding-top:10px;
+        border-top:1px solid #f0f0f0;
+        padding-top:8px;
     }
-    .metrics-row {
+    .metric-group {
         display:flex;
-        gap:20px;
+        gap:16px;
         align-items:center;
     }
-    .metric-col {
+    .metric-item {
         display:flex;
         flex-direction:column;
         align-items:center;
+        min-width:45px;
     }
     .metric-label {
-        font-size:11px;
+        font-size:10px;
         color:#999;
-        margin-bottom:2px;
+        margin-bottom:1px;
     }
     .metric-value {
-        font-size:14px;
+        font-size:13px;
         font-weight:500;
     }
     .fund-tag {
-        padding:4px 8px;
-        border-radius:6px;
-        font-size:13px;
+        font-size:11px;
+        padding:2px 6px;
+        border-radius:4px;
     }
     .sector-tag {
-        font-size:12px;
-        padding:3px 8px;
-        border-radius:5px;
+        font-size:11px;
+        padding:2px 6px;
+        border-radius:4px;
         background:#f5f5f5;
     }
     .hot {background:#ffebeb; color:#e63946; font-weight:500;}
+
+    /* 迷你MACD图：高度30px，无任何坐标轴 */
+    .macd-chart {
+        height:30px!important;
+        width:80px!important;
+    }
+    .stLineChart {
+        height:30px!important;
+    }
+    .stLineChart canvas {
+        height:30px!important;
+    }
 
     /* 颜色 */
     .red {color:#e63946;}
     .green {color:#22c55e;}
     .bg-red {background:#ffebeb; color:#e63946;}
     .bg-green {background:#ecfdf5; color:#22c55e;}
+
+    /* 搜索栏紧凑化 */
+    .search-input input {
+        height:38px!important;
+        border-radius:8px!important;
+        background:#fff!important;
+        border:1px solid #e5e5e5!important;
+        font-size:14px!important;
+    }
+    .stButton button {
+        height:38px!important;
+        font-size:14px!important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== ✅ 支持首字母搜索的顶部栏 =====================
-c1, c2 = st.columns([4,1])
+# ===================== 顶部搜索栏 =====================
+c1, c2 = st.columns([5,1])
 with c1:
     search_input = st.text_input("", placeholder="输入股票代码/首字母（例：600111 / bfxt）", label_visibility="collapsed")
 with c2:
@@ -117,16 +145,13 @@ with c2:
         st.session_state.stock_pool = []
         st.rerun()
 
-# 搜索逻辑：支持数字代码+首字母
 if search_input:
     search = search_input.strip().lower()
-    # 1. 数字代码
     if search.isdigit() and len(search)==6:
         code = "sh"+search if search.startswith(('6','9')) else "sz"+search
         if code not in st.session_state.stock_pool:
             st.session_state.stock_pool.insert(0, code)
             st.rerun()
-    # 2. 首字母
     elif search in STOCK_PY_MAP:
         code = STOCK_PY_MAP[search]
         if code not in st.session_state.stock_pool:
@@ -135,12 +160,12 @@ if search_input:
 
 st.divider()
 
-# ===================== 核心数据函数（修复均价+MACD） =====================
+# ===================== 数据函数 =====================
 @st.cache_data(ttl=10, show_spinner=False)
-def get_stock_data(full_code):
+def get_data(full_code):
     try:
         code = full_code[2:]
-        # 1. 实时行情
+        # 实时行情
         res = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=2)
         res.encoding = "gbk"
         arr = res.text.split("~")
@@ -148,107 +173,106 @@ def get_stock_data(full_code):
         price = arr[3]
         change = float(arr[32]) if arr[32] else 0.0
 
-        # 2. ✅ 正确获取K线数据（修复均价不显示）
-        kline_res = requests.get(
-            f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={full_code},day,,,30,qfq",
-            timeout=2
-        )
-        kline_json = kline_res.json()
-        kline_list = kline_json['data'][full_code]['qfqday']
-        close_list = [float(x[2]) for x in kline_list]  # 收盘价
+        # 日K数据（计算均线+MACD）
+        kres = requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={full_code},day,,,20,qfq", timeout=2)
+        kdata = kres.json()['data'][full_code]['qfqday']
+        close = [float(x[2]) for x in kdata]
 
-        # 3. 计算MA5、MA10
-        ma5 = round(sum(close_list[-5:])/5, 2)
-        ma10 = round(sum(close_list[-10:])/10, 2)
+        # 均线
+        ma5 = round(sum(close[-5:])/5,2)
+        ma10 = round(sum(close[-10:])/10,2)
 
-        # 4. 计算MACD(5,10,4) + 最近10天数据用于画图
-        def ema(data, span):
-            ema_list = []
-            ema_list.append(data[0])
-            for i in range(1, len(data)):
-                ema_list.append((2*data[i] + (span-1)*ema_list[i-1])/(span+1))
-            return ema_list
-        
-        ema5 = ema(close_list, 5)
-        ema10 = ema(close_list, 10)
-        dif = [ema5[i]-ema10[i] for i in range(len(ema5))]
-        dea = ema(dif, 4)
-        macd_list = [(dif[i]-dea[i])*2 for i in range(len(dif))]
-        macd_latest = round(macd_list[-1], 3)
-        # 最近10天MACD用于画图
-        macd_chart_data = pd.DataFrame({"MACD": macd_list[-10:]})
+        # MACD(5,10,4) 日K数据
+        def ema(d, s):
+            e = [d[0]]
+            for i in range(1, len(d)):
+                e.append((2*d[i]+(s-1)*e[i-1])/(s+1))
+            return e
+        e5 = ema(close,5)
+        e10 = ema(close,10)
+        dif = [e5[i]-e10[i] for i in range(len(e5))]
+        dea = ema(dif,4)
+        macd = [(dif[i]-dea[i])*2 for i in range(len(dif))]
+        macd_chart = pd.DataFrame({"MACD": macd[-10:]}) # 最近10个交易日
 
-        # 5. 板块映射
+        # 板块+资金
         sector_map = {
-            "600111":"稀土永磁", "002428":"小金属", "002364":"电力设备",
-            "603986":"半导体", "600410":"云计算", "001896":"电力",
-            "600566":"医药", "000988":"光通信", "603629":"算力"
+            "001896":"电力", "002364":"电力设备", "600111":"稀土永磁", "002428":"小金属",
+            "603986":"半导体", "600410":"云计算", "600566":"医药", "000988":"光通信"
         }
         sector = sector_map.get(code, "综合")
-
-        # 6. 资金流向
-        fund = "+2.1亿" if change >=0 else "-1.6亿"
-        is_inflow = change >=0
+        fund = "+2.1亿" if change>=0 else "-1.6亿"
+        is_in = change>=0
 
         return {
-            "name": name, "code": code, "price": price, "change": change,
-            "ma5": ma5, "ma10": ma10, "macd": macd_latest, "macd_chart": macd_chart_data,
-            "sector": sector, "fund": fund, "is_inflow": is_inflow
+            "name":name, "code":code, "price":price, "change":change,
+            "ma5":ma5, "ma10":ma10, "macd":macd[-1], "macd_chart":macd_chart,
+            "sector":sector, "fund":fund, "is_in":is_in
         }
     except:
         return None
 
-# ===================== 渲染（最终布局） =====================
+# ===================== 渲染（严格2行） =====================
 for full_code in st.session_state.stock_pool:
-    data = get_stock_data(full_code)
-    if not data:
-        continue
+    data = get_data(full_code)
+    if not data: continue
 
     # 颜色
-    c_price = "red" if data["change"] >=0 else "green"
-    c_change = "bg-red" if data["change"] >=0 else "bg-green"
-    c_fund = "bg-red" if data["is_inflow"] else "bg-green"
-    c_macd = "red" if data["macd"]>0 else "green"
-    c_sector = "sector-tag hot" if any(s in data["sector"] for s in HOT_SECTORS) else "sector-tag"
+    c_p = "red" if data['change']>=0 else "green"
+    c_c = "bg-red" if data['change']>=0 else "bg-green"
+    c_f = "bg-red" if data['is_in'] else "bg-green"
+    c_m = "red" if data['macd']>0 else "green"
+    c_s = "sector-tag hot" if any(s in data['sector'] for s in HOT_SECTORS) else "sector-tag"
 
-    # 卡片容器
+    # 卡片
     with st.container():
         st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
         
-        # ✅ 第一行：名称+代码 + 现价+涨跌幅
+        # 第一行
         st.markdown(f"""
-        <div class="row-top">
-            <div class="left-title">
+        <div class="row-1">
+            <div class="left-info">
                 <div class="stock-name">{data['name']}</div>
                 <div class="stock-code">{data['code']}</div>
             </div>
-            <div class="right-price">
-                <div class="price {c_price}">{data['price']}</div>
-                <div class="change {c_change}">{data['change']}%</div>
+            <div class="right-quote">
+                <div class="price {c_p}">{data['price']}</div>
+                <div class="change {c_c}">{data['change']}%</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # ✅ 第二行：MA5 + MA10 + 资金流 + MACD曲线图 + 板块
-        col1, col2, col3, col4, col5 = st.columns([1,1,1,2,1])
+        # 第二行（全部对齐）
+        col1, col2, col3, col4, col5 = st.columns([1,1,1,1.5,1])
         with col1:
-            st.metric("5日均价", data['ma5'], label_visibility="visible")
+            st.markdown(f"""
+            <div class="metric-item">
+                <div class="metric-label">5日均价</div>
+                <div class="metric-value">{data['ma5']}</div>
+            </div>
+            """, unsafe_allow_html=True)
         with col2:
-            st.metric("10日均价", data['ma10'], label_visibility="visible")
+            st.markdown(f"""
+            <div class="metric-item">
+                <div class="metric-label">10日均价</div>
+                <div class="metric-value">{data['ma10']}</div>
+            </div>
+            """, unsafe_allow_html=True)
         with col3:
-            st.markdown(f'<div class="fund-tag {c_fund}">{data["fund"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="fund-tag {c_f}">{data["fund"]}</div>', unsafe_allow_html=True)
         with col4:
-            # ✅ MACD小曲线图（高度60，无坐标轴）
+            # 迷你MACD日K图（无坐标轴）
             st.line_chart(
                 data['macd_chart'],
-                height=60,
+                height=30,
                 use_container_width=True,
-                color="#e63946" if data["macd"]>0 else "#22c55e",
-                x_label="", y_label=""
+                color="#e63946" if data['macd']>0 else "#22c55e",
+                x_label="", y_label="",
+                hide_axis=True
             )
         with col5:
-            st.markdown(f'<div class="{c_sector}">{data["sector"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{c_s}">{data["sector"]}</div>', unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
