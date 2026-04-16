@@ -6,13 +6,12 @@ from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局配置 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=3000, limit=None, key="eagle_eye_fix_v7")
+st_autorefresh(interval=3000, limit=None, key="eagle_eye_fix_v8")
 
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sz001896", "sz002364", "sh600111", "sz002428"]
 
-HOT_SECTORS = ["AI", "芯片", "算力", "新能源", "光伏", "稀土", "电力"]
-STOCK_PY_MAP = {"ynzy":"sz002428", "bfxt":"sh600111", "zhdq":"sz002364", "ynkg":"sz001896"}
+STOCK_PY_MAP = {"ynzy":"sz002428", "bfxt":"sh600111", "zhdq":"sz002364", "ynnt":"sz001896"}
 
 # ===================== 顶级 UI 样式引擎 =====================
 st.markdown("""
@@ -31,10 +30,8 @@ st.markdown("""
     .stButton > button:hover { color: #ef4444 !important; }
 
     /* 徽章与标签样式 */
-    .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; display: inline-block; border: 1px solid transparent; }
-    .b-score { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
-    .b-sector { background: #e0f2fe; color: #0284c7; } /* 板块 */
-    .b-fund { background: #f3f4f6; color: #475569; } /* 资金 */
+    .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; display: inline-block; border: 1px solid transparent; }
+    .b-sector { background: rgba(2, 132, 199, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); } /* 优化后的题材标签颜色 */
     .b-fund-red { background: rgba(239, 68, 68, 0.15); color: #ef4444; } /* 资金红 */
     .b-fund-green { background: rgba(34, 197, 94, 0.15); color: #22c55e; } /* 资金绿 */
     
@@ -48,7 +45,7 @@ st.markdown("""
 # --- A. 顶部搜索 ---
 col_s1, col_s2 = st.columns([0.85, 0.15])
 with col_s1:
-    new_code = st.text_input("", placeholder="🔍 输入代码/首字母快速审计", label_visibility="collapsed")
+    new_code = st.text_input("", placeholder="🔍 输入代码/拼音首字母快速审计 (如 ynzy)", label_visibility="collapsed")
 with col_s2:
     if st.button("清空池"): 
         st.session_state.stock_pool = []
@@ -63,9 +60,9 @@ if new_code:
 
 # ===================== 数据函数 =====================
 @st.cache_data(ttl=5, show_spinner=False)
-def get_data_v7(full_code):
+def get_data_v8(full_code):
     try:
-        # 获取基础数据
+        # 获取基础快照数据
         res = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=1)
         res.encoding = 'gbk'
         arr = res.text.split("~")
@@ -95,28 +92,30 @@ def get_data_v7(full_code):
         # 金叉逻辑：DIF上穿DEA
         is_cross = (dif[-1]>dea[-1] and dif[-2]<=dea[-2])
 
-        # 开盘溢价（修复：不重复调用接口）
+        # 开盘溢价
         prem = round((open_p - lclose) / lclose * 100, 2)
 
         # 资金流向模拟（红入绿出）
-        fund_text = "+1.2亿" if pct >= 0 else "-0.8亿"
+        fund_text = "主力净流 +1.2亿" if pct >= 0 else "主力净流 -0.8亿"
         fund_class = "b-fund-red" if pct >= 0 else "b-fund-green"
 
-        # Plotly 数据
-        plot_df = pd.DataFrame({
-            'DIFF': dif[-15:], 'DEA': dea[-15:], 'MACD': macd[-15:]
-        })
+        plot_df = pd.DataFrame({'DIFF': dif[-15:], 'DEA': dea[-15:], 'MACD': macd[-15:]})
 
-        sector_map = {
-            "001896":"电力", "002364":"电力设备", 
-            "600111":"稀土永磁", "002428":"小金属"
+        # ===================== 核心优化：热门题材映射 =====================
+        # 使用列表存储该股票近期的核心/热门概念
+        concept_map = {
+            "001896": ["绿电", "风电", "盐业重组"], 
+            "002364": ["液冷超充", "储能", "数据中心"], 
+            "600111": ["稀土永磁", "小金属", "国企改革"], 
+            "002428": ["小金属", "第三代半导体", "砷化镓"]
         }
+        themes = concept_map.get(full_code[2:], ["热门题材", "近期热点"])
         
         return {
             "code": full_code[2:], "name": name, "price": price, "pct": pct, 
             "prem": prem, "ma5": ma5, "ma10": ma10, 
             "plot_df": plot_df, "is_cross": is_cross,
-            "sector": sector_map.get(full_code[2:], "题材"),
+            "themes": themes,  # 返回题材列表
             "fund_text": fund_text, "fund_class": fund_class
         }
     except: 
@@ -124,29 +123,31 @@ def get_data_v7(full_code):
 
 # ===================== 双行卡牌流渲染 =====================
 for code in st.session_state.stock_pool:
-    data = get_data_v7(code)
+    data = get_data_v8(code)
     if not data: 
         continue
 
     c_hex = "#ef4444" if data['pct'] >= 0 else "#22c55e" # A股红绿
     
-    # 使用 container(border=True) 强制锁死卡牌边框
+    # 题材标签 HTML 生成
+    themes_html = "".join([f"<span class='badge b-sector' style='margin-right:6px;'>{t}</span>" for t in data['themes']])
+
     with st.container(border=True):
-        # --- 第一行：身份、评分、实时报价 ---
-        r1_l, r1_m, r1_r = st.columns([0.45, 0.45, 0.1])
+        # --- 第一行：身份、题材标签、实时报价 ---
+        r1_l, r1_m, r1_r = st.columns([0.5, 0.4, 0.1])
         with r1_l:
             st.markdown(f"""
-            <div style='line-height:1.2; margin-top:2px;'>
-                <div><span class='badge b-score'>评分 90</span></div>
+            <div style='line-height:1.3; margin-top:2px;'>
                 <div style='font-size:16px; font-weight:bold; color:#f0f6fc;'>
                     {data['name']}
-                    <span style='font-size:12px; color:#64748b; margin-left:5px;'>{data['code']}</span>
+                    <span style='font-size:12px; color:#64748b; margin-left:4px; font-weight:normal;'>{data['code']}</span>
                 </div>
+                <div style='margin-top:6px;'>{themes_html}</div>
             </div>
             """, unsafe_allow_html=True)
         with r1_m:
             st.markdown(f"""
-            <div style='text-align:right; line-height:1.2; margin-top:10px;'>
+            <div style='text-align:right; line-height:1.2; margin-top:8px;'>
                 <span class='price-val' style='color:{c_hex};'>{data['price']:.2f}</span>
                 <span class='pct-val' style='background:{c_hex}15; color:{c_hex}; padding:2px 4px; border-radius:4px; margin-left:5px;'>
                     {data['pct']}%
@@ -154,59 +155,52 @@ for code in st.session_state.stock_pool:
             </div>
             """, unsafe_allow_html=True)
         with r1_r:
-            # ✅ 修复：删除按钮的session_state键名错误
             if st.button("✕", key=f"del_{code}"):
                 st.session_state.stock_pool.remove(code)
                 st.rerun()
 
-        # --- 第二行：均线、专业MACD图、标签 ---
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True) # 呼吸空间
+        # --- 第二行：技术指标、完全锁定的MACD图、资金流 ---
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True) 
         
-        r2_l, r2_m, r2_r = st.columns([0.35, 0.35, 0.3])
+        r2_l, r2_m, r2_r = st.columns([0.3, 0.45, 0.25])
         with r2_l:
             st.markdown(f"""
             <div class="mini-data">
-                <div>溢价: {data['prem']}%</div>
+                <div>今日溢价: <span style='color:{"#ef4444" if data['prem']>0 else "#22c55e"};'>{data['prem']}%</span></div>
                 <div>MA5: {data['ma5']}</div>
                 <div>MA10: {data['ma10']}</div>
             </div>
             """, unsafe_allow_html=True)
         
         with r2_m:
-            # ===================== 核心：Plotly 专业级 MACD =====================
+            # ===================== 静态 Plotly MACD =====================
             df = data['plot_df']
             fig = go.Figure()
-            # 1. 绘制 DIFF (灰) 和 DEA (蓝) 双线
             fig.add_trace(go.Scatter(y=df['DIFF'], mode='lines', line=dict(color='#8b949e', width=1)))
             fig.add_trace(go.Scatter(y=df['DEA'], mode='lines', line=dict(color='#3b82f6', width=1)))
-            # 2. 绘制 MACD 紅綠柱
             fig.add_trace(go.Bar(y=df['MACD'], marker_color=['#ef4444' if x>0 else '#22c55e' for x in df['MACD']]))
-            # 3. 0轴线
             fig.add_hline(y=0, line_dash="solid", line_color="#30363d", line_width=1)
-            # 4. 金叉标记
+            
             if data['is_cross']:
                 fig.add_trace(go.Scatter(
                     x=[df.index[-1]], y=[0], 
-                    mode='markers', 
-                    marker=dict(symbol='triangle-up', size=10, color='#fbbf24')
+                    mode='markers', marker=dict(symbol='triangle-up', size=10, color='#fbbf24')
                 ))
             
-            # 手机窄屏配置
+            # 关闭悬停交互和拖拽，将图表变成静态图
             fig.update_layout(
-                height=60, margin=dict(l=0, r=0, t=10, b=10, pad=0),
+                height=55, margin=dict(l=0, r=0, t=5, b=5, pad=0),
                 showlegend=False, xaxis_visible=False, yaxis_visible=False,
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                hovermode=False
+                hovermode=False, dragmode=False # 彻底锁定交互
             )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            
+            # 使用 config 参数隐藏工具栏并开启静态模式
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': True})
             
         with r2_r:
             st.markdown(f"""
             <div style='text-align:right; margin-top:20px;'>
-                <span class='badge {data['fund_class']}' style='margin-bottom:3px;'>
-                    资金：{data['fund_text']}
-                </span>
-                <br>
-                <span class='badge b-sector'>{data['sector']}</span>
+                <span class='badge {data['fund_class']}'>{data['fund_text']}</span>
             </div>
             """, unsafe_allow_html=True)
