@@ -13,8 +13,8 @@ st.set_page_config(
 # 强制移动端适配
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
-# ✅ 官方自动刷新：5秒一次，稳定无死循环
-st_autorefresh(interval=5000, limit=None, key="auto_refresh_final")
+# ✅ 官方自动刷新：1.5秒一次，稳定无死循环
+st_autorefresh(interval=1500, limit=None, key="auto_refresh_final")
 
 # 初始化股票池
 if 'stock_pool' not in st.session_state:
