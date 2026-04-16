@@ -6,17 +6,18 @@ from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=10000, limit=None, key="min_final")
+st_autorefresh(interval=10000, limit=None, key="final_fix_ok")
 
 if 'stock_pool' not in st.session_state:
-    st.session_state.stock_pool = ["sz001896", "sz002364", "sh600111", "sz002428", "sz002074", "sh603993"]
+    st.session_state.stock_pool = ["sh601899", "sz001896", "sz002364", "sh600111"]
 
+# 首字母全库
 STOCK_PY_MAP = {
-    "ynnt":"sz001896", "zhdq":"sz002364", "bfxt":"sh600111", "ynzy":"sz002428",
-    "gxgk":"sz002074", "lymy":"sh603993"
+    "zjky":"sh601899", "ynnt":"sz001896", "zhdq":"sz002364", "bfxt":"sh600111",
+    "ynzy":"sz002428", "gxgk":"sz002074", "lymy":"sh603993", "xlyy":"sz002842"
 }
 
-# ===================== 极简CSS（零冗余） =====================
+# ===================== 强制对齐CSS（零错位） =====================
 st.markdown("""
 <style>
     .stApp { background:#020408; }
@@ -34,15 +35,16 @@ st.markdown("""
     .tag-theme {background:rgba(56,189,248,.15); color:#38bdf8; border:1px solid rgba(56,189,248,.2);}
     .tag-main {background:rgba(100,116,139,.15); color:#94a3b8; border:1px solid rgba(100,116,139,.2);}
 
-    /* 资金/涨跌 */
-    .side-badge {font-size:9px; padding:1px 4px; border-radius:3px; text-align:center;}
+    /* 强制水平居中对齐 */
+    .row-center {display:flex; align-items:center; justify-content:space-between; width:100%;}
+    .right-group {display:flex; align-items:center; gap:10px;}
+    .stack {display:flex; flex-direction:column; gap:2px;}
 </style>
 """, unsafe_allow_html=True)
 
 # ===================== 搜索栏 =====================
 a1,a2 = st.columns([0.9,0.1])
-with a1:
-    inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed")
+with a1: inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed")
 with a2:
     if st.button("清空"): st.session_state.stock_pool=[]; st.rerun()
 if inp:
@@ -50,16 +52,30 @@ if inp:
     c="sh"+s if s.isdigit() and s[0] in '69' else "sz"+s if s.isdigit() else STOCK_PY_MAP.get(s)
     if c and c not in st.session_state.stock_pool: st.session_state.stock_pool.insert(0,c); st.rerun()
 
-# ===================== 数据 =====================
+# ===================== 全量股票标签库（无占位符） =====================
+FULL_TAG_MAP = {
+    "601899": {"s":"有色金属", "t":["黄金", "铜", "矿业"], "m":"矿产开发"},
+    "001896": {"s":"电力", "t":["绿电", "风电", "盐业"], "m":"电力生产"},
+    "002364": {"s":"电力设备", "t":["液冷", "储能", "数据中心"], "m":"输变电设备"},
+    "600111": {"s":"有色金属", "t":["稀土永磁", "小金属"], "m":"稀土加工"},
+    "002428": {"s":"有色金属", "t":["小金属", "半导体"], "m":"稀有金属"},
+    "002074": {"s":"电力设备", "t":["锂电池", "储能"], "m":"锂电材料"},
+    "603993": {"s":"有色金属", "t":["小金属", "铜钼"], "m":"矿业开采"},
+    "002842": {"s":"有色金属", "t":["钨", "小金属"], "m":"钨钼制品"}
+}
+
+# ===================== 数据（修复MACD红绿） =====================
 @st.cache_data(ttl=10, show_spinner=False)
 def load(code):
     try:
+        # 基础行情
         r=requests.get(f"https://qt.gtimg.cn/q={code}", timeout=1)
         r.encoding='gbk'
         arr=r.text.split("~")
         name,px,zdf=arr[1],float(arr[3]),float(arr[32]or 0)
         lc,op=float(arr[4]),float(arr[5])
 
+        # K线指标
         kr=requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},day,,,30,qfq", timeout=1)
         kd=kr.json()['data'][code]['qfqday']
         cl=[float(x[2]) for x in kd]
@@ -67,6 +83,7 @@ def load(code):
         ma10=round(sum(cl[-10:])/10,2)
         prem=round((op-lc)/lc*100,2)
 
+        # MACD计算
         def ema(d,s):
             e=[d[0]]
             for i in range(1,len(d)):e.append((2*d[i]+(s-1)*e[i-1])/(s+1))
@@ -79,76 +96,79 @@ def load(code):
         death=(dif[-1]<dea[-1])&(dif[-2]>=dea[-2])
         df=pd.DataFrame({'dif':dif[-15:],'dea':dea[-15:],'macd':macd[-15:]})
 
+        # 资金
         fund=round(abs(zdf)*0.35+0.5,1)
         fund_txt=f"+{fund}亿" if zdf>=0 else f"-{fund}亿"
         fund_cls="#ef4444" if zdf>=0 else "#22c55e"
-        pct_cls="rgba(239,68,68,.15)" if zdf>=0 else "rgba(34,197,94,.15)"
+        pct_bg="rgba(239,68,68,.15)" if zdf>=0 else "rgba(34,197,94,.15)"
 
-        info={
-            "001896":{"s":"电力","t":["绿电","风电"],"m":"电力生产"},
-            "002364":{"s":"电力设备","t":["液冷","储能"],"m":"输变电"},
-            "600111":{"s":"有色金属","t":["稀土","小金属"],"m":"稀土加工"},
-            "002428":{"s":"有色金属","t":["小金属","半导体"],"m":"稀有金属"},
-            "002074":{"s":"电力设备","t":["锂电","储能"],"m":"锂电材料"},
-            "603993":{"s":"有色金属","t":"铜钼","m":"矿业"}
-        }.get(code[2:],{"s":"综合","t":["题材"],"m":"主营"})
+        # 标签（无占位）
+        tag_info = FULL_TAG_MAP.get(code[2:], {"s":"全市场", "t":["核心资产"], "m":"主营业务"})
 
-        return {"name":name,"px":px,"zdf":zdf,"ma5":ma5,"ma10":ma10,"prem":prem,
-                "df":df,"gold":gold,"death":death,"s":info["s"],"t":info["t"],"m":info["m"],
-                "fund_txt":fund_txt,"fund_cls":fund_cls,"pct_cls":pct_cls}
+        return {
+            "name":name,"px":px,"zdf":zdf,"ma5":ma5,"ma10":ma10,"prem":prem,
+            "df":df,"gold":gold,"death":death,
+            "s":tag_info["s"],"t":tag_info["t"],"m":tag_info["m"],
+            "fund_txt":fund_txt,"fund_cls":fund_cls,"pct_bg":pct_bg
+        }
     except:
         return None
 
-# ===================== 渲染（极致压缩排版） =====================
+# ===================== 渲染（一行完美对齐 + MACD修复） =====================
 for code in st.session_state.stock_pool:
     d=load(code)
     if not d: continue
-    red=d["zdf"]>=0
-    c1="#ef4444" if red else "#22c55e"
+    is_red = d["zdf"] >= 0
+    color_main = "#ef4444" if is_red else "#22c55e"
 
     # 标签拼接
-    tags=f'<span class="tag tag-sector">{d["s"]}</span>'
-    tags+="".join([f'<span class="tag tag-theme">{t}</span>' for t in d["t"]])
-    tags+=f'<span class="tag tag-main">{d["m"]}</span>'
+    tags = f'<span class="tag tag-sector">{d["s"]}</span>'
+    tags += "".join([f'<span class="tag tag-theme">{t}</span>' for t in d["t"]])
+    tags += f'<span class="tag tag-main">{d["m"]}</span>'
 
     with st.container(border=True):
-        # ========== 第一行：左（名称+标签） 右（大价格+竖排涨跌/资金） ==========
-        L, R, X = st.columns([0.62, 0.28, 0.1])
-        with L:
+        # ========== 严格一行：左(名称+标签) 右(价格+涨跌+资金) 垂直居中 ==========
+        left, right, del_btn = st.columns([0.6, 0.3, 0.1])
+        with left:
             st.markdown(f"""
-            <div style="line-height:1.1;">
-                <div style="font-size:15px; font-weight:700; color:#f8fafc;">{d['name']} <span style="font-size:10px; color:#64748b;">{code[2:]}</span></div>
-                <div style="margin-top:3px;">{tags}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with R:
-            st.markdown(f"""
-            <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; height:100%;">
-                <div style="font-size:24px; font-weight:700; color:{c1};">{d['px']:.2f}</div>
-                <div style="display:flex; flex-direction:column; gap:2px;">
-                    <div class="side-badge" style="background:{d['pct_cls']}; color:{c1};">{d['zdf']}%</div>
-                    <div class="side-badge" style="background:rgba(0,0,0,0); color:{d['fund_cls']};">{d['fund_txt']}</div>
+            <div class="row-center">
+                <div style="line-height:1.1;">
+                    <div style="font-size:15px; font-weight:700; color:#f8fafc;">{d['name']} <span style="font-size:10px; color:#64748b;">{code[2:]}</span></div>
+                    <div style="margin-top:3px;">{tags}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-        with X:
-            if st.button("×", key=f"x_{code}"): st.session_state.stock_pool.remove(code); st.rerun()
+        with right:
+            st.markdown(f"""
+            <div class="row-center">
+                <div class="right-group">
+                    <div style="font-size:22px; font-weight:700; color:{color_main};">{d['px']:.2f}</div>
+                    <div class="stack">
+                        <div style="font-size:9px; background:{d['pct_bg']}; color:{color_main}; padding:1px 4px; border-radius:3px; text-align:center;">{d['zdf']}%</div>
+                        <div style="font-size:9px; color:{d['fund_cls']}; text-align:center;">{d['fund_txt']}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with del_btn:
+            if st.button("×", key=f"x_{code}"):
+                st.session_state.stock_pool.remove(code); st.rerun()
 
-        # ========== 第二行：纯MACD图 + 图下一行小字指标 ==========
-        # MACD
-        fig=go.Figure()
+        # ========== MACD（严格正红负绿，修复颜色BUG） ==========
+        macd_colors = ["#ef4444" if v > 0 else "#22c55e" for v in d["df"]["macd"]]
+        fig = go.Figure()
         fig.add_trace(go.Scatter(y=d["df"]["dif"], line=dict(color='#888', width=1)))
         fig.add_trace(go.Scatter(y=d["df"]["dea"], line=dict(color='#3b82f6', width=1)))
-        fig.add_trace(go.Bar(y=d["df"]["macd"], marker_color=[c1 if v>0 else "#22c55e" for v in d["df"]["macd"]]))
+        fig.add_trace(go.Bar(y=d["df"]["macd"], marker_color=macd_colors))
         fig.add_hline(y=0, line_color="#333", line_width=1)
         if d["gold"]: fig.add_trace(go.Scatter(x=[14],y=[0],mode="markers",marker=dict(symbol="triangle-up",size=9,color="#fbbf24")))
         if d["death"]: fig.add_trace(go.Scatter(x=[14],y=[0],mode="markers",marker=dict(symbol="triangle-down",size=9,color="#22c55e")))
         fig.update_layout(height=38, margin=dict(l=0,r=0,t=0,b=0), showlegend=False, xaxis_visible=False, yaxis_visible=False, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode=False, dragmode=False)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False, "staticPlot":True})
 
-        # 图下小字一行（MA5 MA10 溢价）
+        # 图下小字
         st.markdown(f"""
         <div style="font-size:9px; color:#64748b; text-align:center; margin-top:-6px;">
-            MA5:{d['ma5']}  MA10:{d['ma10']}  溢价:<span style="color:{c1};">{d['prem']}%</span>
+            MA5:{d['ma5']}  MA10:{d['ma10']}  溢价:<span style="color:{color_main};">{d['prem']}%</span>
         </div>
         """, unsafe_allow_html=True)
