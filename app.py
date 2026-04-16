@@ -4,277 +4,142 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局配置 =====================
-st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
-st_autorefresh(interval=8000, limit=None, key="fix_final")
+st.set_page_config(page_title="鹰眼自选终端", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=8000, limit=None, key="eagle_eye_watchlist")
 
-# 自选股初始化
+# ===================== 核心 UI 样式锁死 =====================
+# 只用 CSS 处理背景色、边距和文字颜色，绝不干涉布局
+st.markdown("""
+<style>
+    /* 全局高级暗色/灰度底色，根据喜好调整，这里用极简白灰 */
+    .stApp { background: #f8fafc; font-family: -apple-system, sans-serif; }
+    #MainMenu, header, footer { display: none !important; }
+    .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+    
+    /* 极致压缩原生容器间距 */
+    [data-testid="stVerticalBlock"] { gap: 0.5rem !important; }
+    
+    /* 搜索栏美化 */
+    [data-testid="stTextInput"] input { border-radius: 8px; border: 1px solid #e2e8f0; }
+    
+    /* 自定义指标微型排版 */
+    .mini-metric { text-align: center; line-height: 1.2; }
+    .m-label { font-size: 11px; color: #64748b; margin-bottom: 2px; }
+    .m-val { font-size: 14px; font-weight: 600; color: #0f172a; }
+    
+    /* 标签样式 */
+    .tag-base { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; display: inline-block;}
+    .tag-hot { background: #fee2e2; color: #ef4444; border: 1px solid #f87171;}
+    .tag-normal { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;}
+    .tag-red { background: #fee2e2; color: #ef4444; }
+    .tag-green { background: #dcfce3; color: #16a34a; }
+</style>
+""", unsafe_allow_html=True)
+
+# 自选池与字典映射
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sz001896", "sz002364", "sh600111", "sz002428"]
 
-# 热门板块+首字母映射
 HOT_SECTORS = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药", "稀土", "有色", "电力"]
 STOCK_PY_MAP = {
     "bfxt":"sh600111", "ynzy":"sz002428", "zhdq":"sz002364", "ynkg":"sz001896",
     "zycx":"sh603986", "hstc":"sh600410", "jcyy":"sh600566", "hgkj":"sz000988"
 }
 
-# ===================== 最终UI（兼容所有版本） =====================
-st.markdown("""
-<style>
-    .stApp {background:#f5f5f5;}
-    #MainMenu,header,footer {display:none;}
-    .block-container {padding:8px 6px!important; max-width:100%!important;}
-    .stVerticalBlock {gap:8px!important;}
-
-    /* 股票卡片：单卡2行，高度≈110px */
-    .stock-card {
-        background:#fff;
-        border-radius:10px;
-        padding:10px 12px;
-        margin-bottom:8px;
-        box-shadow:0 1px 2px rgba(0,0,0,0.05);
-    }
-
-    /* 第一行 */
-    .row-1 {
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        margin-bottom:8px;
-    }
-    .left-info {
-        display:flex;
-        align-items:center;
-        gap:10px;
-    }
-    .stock-name {font-size:16px; font-weight:600; color:#111;}
-    .stock-code {font-size:11px; color:#999;}
-    .right-quote {
-        display:flex;
-        align-items:center;
-        gap:8px;
-    }
-    .price {font-size:18px; font-weight:600;}
-    .change {
-        font-size:13px;
-        padding:2px 6px;
-        border-radius:4px;
-    }
-
-    /* 第二行 */
-    .row-2 {
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        border-top:1px solid #f0f0f0;
-        padding-top:8px;
-    }
-    .metric-item {
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        min-width:45px;
-    }
-    .metric-label {
-        font-size:10px;
-        color:#999;
-        margin-bottom:1px;
-    }
-    .metric-value {
-        font-size:13px;
-        font-weight:500;
-    }
-    .fund-tag {
-        font-size:11px;
-        padding:2px 6px;
-        border-radius:4px;
-    }
-    .sector-tag {
-        font-size:11px;
-        padding:2px 6px;
-        border-radius:4px;
-        background:#f5f5f5;
-    }
-    .hot {background:#ffebeb; color:#e63946; font-weight:500;}
-
-    /* ✅ CSS隐藏MACD坐标轴（兼容所有版本） */
-    .macd-container {
-        height:30px!important;
-        width:80px!important;
-        overflow:hidden;
-    }
-    .macd-container .stLineChart {
-        height:70px!important;
-        margin-top:-20px!important;
-    }
-    .macd-container svg {
-        transform: translateY(-20px);
-    }
-    .macd-container .stAxis {
-        display:none!important;
-    }
-
-    /* 颜色 */
-    .red {color:#e63946;}
-    .green {color:#22c55e;}
-    .bg-red {background:#ffebeb; color:#e63946;}
-    .bg-green {background:#ecfdf5; color:#22c55e;}
-
-    /* 搜索栏 */
-    .search-input input {
-        height:38px!important;
-        border-radius:8px!important;
-        background:#fff!important;
-        border:1px solid #e5e5e5!important;
-        font-size:14px!important;
-    }
-    .stButton button {
-        height:38px!important;
-        font-size:14px!important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ===================== 顶部搜索栏 =====================
-c1, c2 = st.columns([5,1])
-with c1:
-    search_input = st.text_input("", placeholder="输入股票代码/首字母（例：600111 / bfxt）", label_visibility="collapsed")
-with c2:
+# ===================== 顶部操作区 =====================
+col_search, col_clear = st.columns([0.8, 0.2])
+with col_search:
+    search_input = st.text_input("", placeholder="🔍 输入代码/首字母 (例: bfxt)", label_visibility="collapsed")
+with col_clear:
     if st.button("清空", use_container_width=True):
         st.session_state.stock_pool = []
         st.rerun()
 
 if search_input:
     search = search_input.strip().lower()
+    code = None
     if search.isdigit() and len(search)==6:
         code = "sh"+search if search.startswith(('6','9')) else "sz"+search
-        if code not in st.session_state.stock_pool:
-            st.session_state.stock_pool.insert(0, code)
-            st.rerun()
     elif search in STOCK_PY_MAP:
         code = STOCK_PY_MAP[search]
-        if code not in st.session_state.stock_pool:
-            st.session_state.stock_pool.insert(0, code)
-            st.rerun()
+        
+    if code and code not in st.session_state.stock_pool:
+        st.session_state.stock_pool.insert(0, code)
+        st.rerun()
 
 st.divider()
 
-# ===================== 数据函数 =====================
-@st.cache_data(ttl=10, show_spinner=False)
+# ===================== 数据获取模块 =====================
+@st.cache_data(ttl=5, show_spinner=False)
 def get_data(full_code):
     try:
         code = full_code[2:]
-        # 实时行情
         res = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=2)
         res.encoding = "gbk"
         arr = res.text.split("~")
-        name = arr[1]
-        price = arr[3]
-        change = float(arr[32]) if arr[32] else 0.0
+        name, price, change = arr[1], arr[3], float(arr[32]) if arr[32] else 0.0
 
-        # 日K数据
+        # K线与指标
         kres = requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={full_code},day,,,20,qfq", timeout=2)
-        kdata = kres.json()['data'][full_code]['qfqday']
-        close = [float(x[2]) for x in kdata]
+        close = [float(x[2]) for x in kres.json()['data'][full_code]['qfqday']]
+        
+        ma5 = round(sum(close[-5:])/5, 2)
+        ma10 = round(sum(close[-10:])/10, 2)
 
-        # 均线
-        ma5 = round(sum(close[-5:])/5,2)
-        ma10 = round(sum(close[-10:])/10,2)
-
-        # MACD(5,10,4)
-        def ema(d, s):
-            e = [d[0]]
-            for i in range(1, len(d)):
-                e.append((2*d[i]+(s-1)*e[i-1])/(s+1))
-            return e
-        e5 = ema(close,5)
-        e10 = ema(close,10)
+        # 简化版 MACD 计算 (只取最后一个值，放弃在卡片里画折线图，保持UI干净)
+        e5, e10 = [close[0]], [close[0]]
+        for i in range(1, len(close)):
+            e5.append((2*close[i]+4*e5[i-1])/6)
+            e10.append((2*close[i]+9*e10[i-1])/11)
         dif = [e5[i]-e10[i] for i in range(len(e5))]
-        dea = ema(dif,4)
-        macd = [(dif[i]-dea[i])*2 for i in range(len(dif))]
-        macd_chart = pd.DataFrame({"MACD": macd[-10:]})
+        dea = [dif[0]]
+        for i in range(1, len(dif)):
+            dea.append((2*dif[i]+3*dea[i-1])/5)
+        macd_val = round((dif[-1]-dea[-1])*2, 2)
 
-        # 板块+资金
-        sector_map = {
-            "001896":"电力", "002364":"电力设备", "600111":"稀土永磁", "002428":"小金属",
-            "603986":"半导体", "600410":"云计算", "600566":"医药", "000988":"光通信"
-        }
-        sector = sector_map.get(code, "综合")
-        fund = "+2.1亿" if change>=0 else "-1.6亿"
-        is_in = change>=0
-
+        sector_map = {"001896":"电力", "002364":"电力设备", "600111":"稀土永磁", "002428":"小金属"}
+        
         return {
-            "name":name, "code":code, "price":price, "change":change,
-            "ma5":ma5, "ma10":ma10, "macd":macd[-1], "macd_chart":macd_chart,
-            "sector":sector, "fund":fund, "is_in":is_in
+            "name": name, "code": code, "price": price, "change": change,
+            "ma5": ma5, "ma10": ma10, "macd": macd_val,
+            "sector": sector_map.get(code, "主力游资"), 
+            "fund": "+2.1亿" if change >= 0 else "-1.6亿",
+            "is_in": change >= 0
         }
     except:
         return None
 
-# ===================== 渲染（无报错） =====================
+# ===================== 原生卡牌渲染队列 =====================
 for full_code in st.session_state.stock_pool:
     data = get_data(full_code)
     if not data: continue
 
-    # 颜色
-    c_p = "red" if data['change']>=0 else "green"
-    c_c = "bg-red" if data['change']>=0 else "bg-green"
-    c_f = "bg-red" if data['is_in'] else "bg-green"
-    c_m = "#e63946" if data['macd']>0 else "#22c55e"
-    c_s = "sector-tag hot" if any(s in data['sector'] for s in HOT_SECTORS) else "sector-tag"
+    color_hex = "#ef4444" if data['change'] >= 0 else "#16a34a"
+    fund_class = "tag-red" if data['is_in'] else "tag-green"
+    sector_class = "tag-hot" if any(s in data['sector'] for s in HOT_SECTORS) else "tag-normal"
 
-    # 卡片
-    with st.container():
-        st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
+    # 使用官方 border=True 生成卡牌，绝对不会错位
+    with st.container(border=True):
         
-        # 第一行
-        st.markdown(f"""
-        <div class="row-1">
-            <div class="left-info">
-                <div class="stock-name">{data['name']}</div>
-                <div class="stock-code">{data['code']}</div>
-            </div>
-            <div class="right-quote">
-                <div class="price {c_p}">{data['price']}</div>
-                <div class="change {c_c}">{data['change']}%</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # 第一层：身份与报价
+        c_title, c_price = st.columns([0.6, 0.4])
+        with c_title:
+            st.markdown(f"<div style='margin-top:5px;'><span style='font-size:18px; font-weight:700;'>{data['name']}</span> <span style='font-size:13px; color:#94a3b8;'>{data['code']}</span></div>", unsafe_allow_html=True)
+        with c_price:
+            st.markdown(f"<div style='text-align:right;'><span style='font-size:20px; font-weight:bold; color:{color_hex};'>{data['price']}</span> <span class='tag-base' style='background:{color_hex}20; color:{color_hex};'>{data['change']}%</span></div>", unsafe_allow_html=True)
+            
+        # 巧妙使用原生分割线替代繁琐的 border-top
+        st.write("") 
 
-        # 第二行
-        col1, col2, col3, col4, col5 = st.columns([1,1,1,1.5,1])
-        with col1:
-            st.markdown(f"""
-            <div class="metric-item">
-                <div class="metric-label">5日均价</div>
-                <div class="metric-value">{data['ma5']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"""
-            <div class="metric-item">
-                <div class="metric-label">10日均价</div>
-                <div class="metric-value">{data['ma10']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col3:
-            st.markdown(f'<div class="fund-tag {c_f}">{data["fund"]}</div>', unsafe_allow_html=True)
-        with col4:
-            # ✅ 兼容所有版本的迷你MACD图
-            with st.container():
-                st.markdown('<div class="macd-container">', unsafe_allow_html=True)
-                st.line_chart(
-                    data['macd_chart'],
-                    height=30,
-                    use_container_width=True,
-                    color=c_m,
-                    x_label="", y_label=""
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-        with col5:
-            st.markdown(f'<div class="{c_s}">{data["sector"]}</div>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+        # 第二层：核心数据阵列
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.markdown(f"<div class='mini-metric'><div class='m-label'>5日均价</div><div class='m-val'>{data['ma5']}</div></div>", unsafe_allow_html=True)
+        with m2:
+            st.markdown(f"<div class='mini-metric'><div class='m-label'>10日均价</div><div class='m-val'>{data['ma10']}</div></div>", unsafe_allow_html=True)
+        with m3:
+            # 放弃画图，改用带色彩的 MACD 柱值，一眼看懂趋势且绝对不撑爆UI
+            macd_color = "#ef4444" if data['macd'] > 0 else "#16a34a"
+            st.markdown(f"<div class='mini-metric'><div class='m-label'>MACD</div><div class='m-val' style='color:{macd_color};'>{data['macd']}</div></div>", unsafe_allow_html=True)
+        with m4:
+            st.markdown(f"<div style='text-align:right;'><div class='tag-base {fund_class}' style='margin-bottom:4px;'>{data['fund']}</div><br><div class='tag-base {sector_class}'>{data['sector']}</div></div>", unsafe_allow_html=True)
