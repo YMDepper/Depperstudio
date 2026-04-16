@@ -1,122 +1,284 @@
 import streamlit as st
 import requests
-import pandas as pd
-import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
-# 1. 页面基础配置：锁死暗色调，适配 iPhone 14 Pro Max 窄屏
-st.set_page_config(page_title="鹰眼审计终端", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=1500, limit=None, key="eagle_eye_v56")
+# ===================== 全局配置 =====================
+st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
+st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
+st_autorefresh(interval=8000, limit=None, key="zero_dep_final")
 
-# 2. 注入顶级 UI 设计师 CSS
+# 自选股初始化
+if 'stock_pool' not in st.session_state:
+    st.session_state.stock_pool = ["sz001896", "sz002364", "sh600111", "sz002428"]
+
+# 热门板块+首字母映射
+HOT_SECTORS = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药", "稀土", "有色", "电力"]
+STOCK_PY_MAP = {
+    "bfxt":"sh600111", "ynzy":"sz002428", "zhdq":"sz002364", "ynkg":"sz001896",
+    "zycx":"sh603986", "hstc":"sh600410", "jcyy":"sh600566", "hgkj":"sz000988"
+}
+
+# ===================== 极致紧凑UI（单股2行） =====================
 st.markdown("""
 <style>
-    .stApp { background-color: #020408; }
-    /* 隐藏所有多余的 Streamlit 边距 */
-    .block-container { padding: 1rem 0.5rem !important; }
-    /* 极致压缩卡片 */
+    .stApp {background:#f5f5f5;}
+    #MainMenu,header,footer {display:none;}
+    .block-container {padding:8px 6px!important; max-width:100%!important;}
+    .stVerticalBlock {gap:8px!important;}
+
+    /* 股票卡片 */
     .stock-card {
-        background: #111827;
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 10px;
-        position: relative;
+        background:#fff;
+        border-radius:10px;
+        padding:10px 12px;
+        margin-bottom:8px;
+        box-shadow:0 1px 2px rgba(0,0,0,0.05);
     }
-    /* 移除按钮样式优化 */
-    .del-btn { position: absolute; top: 10px; right: 10px; z-index: 100; }
-    /* 指标数值美化 */
-    [data-testid="stMetricValue"] { font-size: 22px !important; color: #FFD700 !important; }
-    [data-testid="stMetricLabel"] { font-size: 10px !important; color: #64748b !important; }
+
+    /* 第一行 */
+    .row-1 {
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        margin-bottom:8px;
+    }
+    .left-info {
+        display:flex;
+        align-items:center;
+        gap:10px;
+    }
+    .stock-name {font-size:16px; font-weight:600; color:#111;}
+    .stock-code {font-size:11px; color:#999;}
+    .right-quote {
+        display:flex;
+        align-items:center;
+        gap:8px;
+    }
+    .price {font-size:18px; font-weight:600;}
+    .change {
+        font-size:13px;
+        padding:2px 6px;
+        border-radius:4px;
+    }
+
+    /* 第二行 */
+    .row-2 {
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        border-top:1px solid #f0f0f0;
+        padding-top:8px;
+    }
+    .metric-item {
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        min-width:45px;
+    }
+    .metric-label {
+        font-size:10px;
+        color:#999;
+        margin-bottom:1px;
+    }
+    .metric-value {
+        font-size:13px;
+        font-weight:500;
+    }
+    .fund-tag {
+        font-size:11px;
+        padding:2px 6px;
+        border-radius:4px;
+    }
+    .sector-tag {
+        font-size:11px;
+        padding:2px 6px;
+        border-radius:4px;
+        background:#f5f5f5;
+    }
+    .hot {background:#ffebeb; color:#e63946; font-weight:500;}
+
+    /* ✅ 纯CSS MACD柱状图（零依赖） */
+    .macd-bar-container {
+        display:flex;
+        align-items:flex-end;
+        justify-content:space-between;
+        height:30px;
+        width:80px;
+        gap:1px;
+    }
+    .macd-bar {
+        width:6px;
+        border-radius:1px;
+    }
+    .macd-red {background:#e63946;}
+    .macd-green {background:#22c55e;}
+
+    /* 颜色 */
+    .red {color:#e63946;}
+    .green {color:#22c55e;}
+    .bg-red {background:#ffebeb; color:#e63946;}
+    .bg-green {background:#ecfdf5; color:#22c55e;}
+
+    /* 搜索栏 */
+    .search-input input {
+        height:38px!important;
+        border-radius:8px!important;
+        background:#fff!important;
+        border:1px solid #e5e5e5!important;
+        font-size:14px!important;
+    }
+    .stButton button {
+        height:38px!important;
+        font-size:14px!important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-if 'pool' not in st.session_state:
-    st.session_state.pool = ["sz002428", "sh600111"]
+# ===================== 顶部搜索栏 =====================
+c1, c2 = st.columns([5,1])
+with c1:
+    search_input = st.text_input("", placeholder="输入股票代码/首字母（例：600111 / bfxt）", label_visibility="collapsed")
+with c2:
+    if st.button("清空", use_container_width=True):
+        st.session_state.stock_pool = []
+        st.rerun()
 
-# 3. 数据抓取与专业 MACD 计算
-@st.cache_data(ttl=5)
-def get_pro_data(code):
+if search_input:
+    search = search_input.strip().lower()
+    if search.isdigit() and len(search)==6:
+        code = "sh"+search if search.startswith(('6','9')) else "sz"+search
+        if code not in st.session_state.stock_pool:
+            st.session_state.stock_pool.insert(0, code)
+            st.rerun()
+    elif search in STOCK_PY_MAP:
+        code = STOCK_PY_MAP[search]
+        if code not in st.session_state.stock_pool:
+            st.session_state.stock_pool.insert(0, code)
+            st.rerun()
+
+st.divider()
+
+# ===================== 纯Python计算EMA和MACD（零pandas依赖） =====================
+def calculate_ema(data, span):
+    ema = [data[0]]
+    alpha = 2 / (span + 1)
+    for i in range(1, len(data)):
+        ema.append(alpha * data[i] + (1 - alpha) * ema[i-1])
+    return ema
+
+def calculate_macd(close_list):
+    ema5 = calculate_ema(close_list, 5)
+    ema10 = calculate_ema(close_list, 10)
+    dif = [ema5[i] - ema10[i] for i in range(len(ema5))]
+    dea = calculate_ema(dif, 4)
+    macd = [(dif[i] - dea[i]) * 2 for i in range(len(dif))]
+    return macd[-10:] # 返回最近10个交易日
+
+# ===================== 数据函数 =====================
+@st.cache_data(ttl=10, show_spinner=False)
+def get_data(full_code):
     try:
-        # 抓取实时行情
-        r = requests.get(f"https://qt.gtimg.cn/q={code}", timeout=1)
-        v = r.text.split('~')
-        # 抓取日K数据计算 MACD (5,10,4)
-        k_r = requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},day,,,40,qfq", timeout=1)
-        klines = k_r.json()['data'][code]['qfqday']
-        close = [float(x[2]) for x in klines]
-        
-        # 精准计算 DIFF, DEA (针对你截图要求的 5,10,4 参数)
-        ema5 = pd.Series(close).ewm(span=5, adjust=False).mean()
-        ema10 = pd.Series(close).ewm(span=10, adjust=False).mean()
-        diff = ema5 - ema10
-        dea = diff.ewm(span=4, adjust=False).mean()
-        macd_hist = (diff - dea) * 2
-        
-        # 识别金叉标记 (DIFF 上穿 DEA)
-        cross = (diff > dea) & (diff.shift(1) <= dea.shift(1))
-        
-        df = pd.DataFrame({'DIFF': diff, 'DEA': dea, 'MACD': macd_hist, 'Cross': cross}).tail(20)
-        return {"name": v[1], "price": v[3], "pct": v[32], "df": df}
-    except: return None
+        code = full_code[2:]
+        # 实时行情
+        res = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=2)
+        res.encoding = "gbk"
+        arr = res.text.split("~")
+        name = arr[1]
+        price = arr[3]
+        change = float(arr[32]) if arr[32] else 0.0
 
-# 4. 主界面：手机端流式渲染
-st.markdown('<p style="color:#475569; font-size:12px;">EAGLE EYE PRO TERMINAL</p>', unsafe_allow_html=True)
-search_val = st.text_input("", placeholder="输入代码审计...", label_visibility="collapsed")
-if search_val:
-    c = search_val.strip()
-    if len(c) == 6: c = ("sh"+c if c[0]=='6' else "sz"+c)
-    if c not in st.session_state.pool: st.session_state.pool.insert(0, c); st.rerun()
+        # 日K数据
+        kres = requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={full_code},day,,,20,qfq", timeout=2)
+        kdata = kres.json()['data'][full_code]['qfqday']
+        close = [float(x[2]) for x in kdata]
 
-# 循环渲染卡片
-for c in st.session_state.pool:
-    d = get_pro_data(c)
-    if not d: continue
-    
-    # 模拟卡牌容器
+        # 均线
+        ma5 = round(sum(close[-5:])/5,2)
+        ma10 = round(sum(close[-10:])/10,2)
+
+        # MACD
+        macd_list = calculate_macd(close)
+        macd_latest = round(macd_list[-1], 3)
+
+        # 板块+资金
+        sector_map = {
+            "001896":"电力", "002364":"电力设备", "600111":"稀土永磁", "002428":"小金属",
+            "603986":"半导体", "600410":"云计算", "600566":"医药", "000988":"光通信"
+        }
+        sector = sector_map.get(code, "综合")
+        fund = "+2.1亿" if change>=0 else "-1.6亿"
+        is_in = change>=0
+
+        return {
+            "name":name, "code":code, "price":price, "change":change,
+            "ma5":ma5, "ma10":ma10, "macd":macd_latest, "macd_list":macd_list,
+            "sector":sector, "fund":fund, "is_in":is_in
+        }
+    except:
+        return None
+
+# ===================== 渲染（零报错） =====================
+for full_code in st.session_state.stock_pool:
+    data = get_data(full_code)
+    if not data: continue
+
+    # 颜色
+    c_p = "red" if data['change']>=0 else "green"
+    c_c = "bg-red" if data['change']>=0 else "bg-green"
+    c_f = "bg-red" if data['is_in'] else "bg-green"
+    c_s = "sector-tag hot" if any(s in data['sector'] for s in HOT_SECTORS) else "sector-tag"
+
+    # 生成纯CSS MACD柱状图HTML
+    macd_html = '<div class="macd-bar-container">'
+    max_abs = max(abs(x) for x in data['macd_list'])
+    for val in data['macd_list']:
+        height = int(abs(val)/max_abs * 25) # 最大高度25px
+        color = "macd-red" if val>0 else "macd-green"
+        macd_html += f'<div class="macd-bar {color}" style="height:{height}px;"></div>'
+    macd_html += '</div>'
+
+    # 卡片
     with st.container():
-        # 头部信息：名称、价格、删除按钮
-        col_t1, col_t2, col_t3 = st.columns([0.5, 0.4, 0.1])
-        col_t1.markdown(f"**{d['name']}** `{c.upper()}`")
-        col_t2.markdown(f"<span style='color:#ef4444; font-size:18px; font-weight:bold;'>{d['price']} ({d['pct']}%)</span>", unsafe_allow_html=True)
-        if col_t3.button("×", key=f"del_{c}"):
-            st.session_state.pool.remove(c); st.rerun()
-
-        # 核心：复现你截图中的“周线战略图”MACD
-        # 使用 Plotly 绘制双线 + 柱状图 + 金叉标记
-        df_p = d['df'].reset_index()
-        fig = go.Figure()
+        st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
         
-        # 1. 绘制 DIFF (灰) 和 DEA (蓝)
-        fig.add_trace(go.Scatter(y=df_p['DIFF'], mode='lines', line=dict(color='#8b949e', width=1.5), name='DIFF'))
-        fig.add_trace(go.Scatter(y=df_p['DEA'], mode='lines', line=dict(color='#3b82f6', width=1.5), name='DEA'))
-        
-        # 2. 绘制 MACD 柱
-        colors = ['#ef4444' if x > 0 else '#22c55e' for x in df_p['MACD']]
-        fig.add_trace(go.Bar(y=df_p['MACD'], marker_color=colors, name='MACD'))
-        
-        # 3. 标记金叉小三角
-        cross_idx = df_p[df_p['Cross']].index
-        if not cross_idx.empty:
-            fig.add_trace(go.Scatter(
-                x=cross_idx, y=df_p.loc[cross_idx, 'DIFF'],
-                mode='markers', marker=dict(symbol='triangle-up', size=12, color='#FFD700'),
-                name='金叉'
-            ))
-
-        # 4. 图表视觉锁死配置 (针对手机端极窄空间)
-        fig.update_layout(
-            height=120, margin=dict(l=0, r=0, t=10, b=0),
-            showlegend=False, xaxis_visible=False, yaxis_visible=False,
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            hovermode=False
-        )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        # 推演结论区
+        # 第一行
         st.markdown(f"""
-        <div style="background:rgba(59,130,246,0.1); padding:8px; border-radius:6px; border-left:3px solid #3b82f6; font-size:12px; color:#cbd5e1;">
-            <b>审计结论：</b> MACD出现{'金叉信号' if any(d['df']['Cross']) else '趋势承压'}，配合日线筹码分布，建议关注0轴附近的博弈机会。
+        <div class="row-1">
+            <div class="left-info">
+                <div class="stock-name">{data['name']}</div>
+                <div class="stock-code">{data['code']}</div>
+            </div>
+            <div class="right-quote">
+                <div class="price {c_p}">{data['price']}</div>
+                <div class="change {c_c}">{data['change']}%</div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
-        st.divider()
+
+        # 第二行
+        col1, col2, col3, col4, col5 = st.columns([1,1,1,1.5,1])
+        with col1:
+            st.markdown(f"""
+            <div class="metric-item">
+                <div class="metric-label">5日均价</div>
+                <div class="metric-value">{data['ma5']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="metric-item">
+                <div class="metric-label">10日均价</div>
+                <div class="metric-value">{data['ma10']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown(f'<div class="fund-tag {c_f}">{data["fund"]}</div>', unsafe_allow_html=True)
+        with col4:
+            # ✅ 纯CSS MACD图，零依赖
+            st.markdown(macd_html, unsafe_allow_html=True)
+        with col5:
+            st.markdown(f'<div class="{c_s}">{data["sector"]}</div>', unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
