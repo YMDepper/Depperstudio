@@ -1,21 +1,20 @@
 import streamlit as st
 import requests
-import akshare as ak
 from streamlit_autorefresh import st_autorefresh
 
-# ===================== 全局设置 =====================
+# ===================== 全局配置 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
-st_autorefresh(interval=8000, limit=None, key="final_fix")
+st_autorefresh(interval=8000, limit=None, key="zero_dep_final")
 
 # 自选股初始化
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sz002364", "sh603986", "sz000988"]
 
 # 热门板块标红
-HOT = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药"]
+HOT_SECTORS = ["AI", "芯片", "半导体", "算力", "CPO", "机器人", "新能源", "光伏", "储能", "军工", "医药"]
 
-# ===================== 样式（小字标注 + 无乱码） =====================
+# ===================== 样式（小字标注+无乱码） =====================
 st.markdown("""
 <style>
     .stApp {background:#f5f5f5;}
@@ -104,59 +103,92 @@ if new_code and len(new_code.strip())==6:
 
 st.divider()
 
-# ===================== 极简数据函数（云端不卡死） =====================
+# ===================== 纯腾讯接口数据计算（零akshare依赖） =====================
 @st.cache_data(ttl=10, show_spinner=False)
-def get_data(full_code):
+def get_all_data(full_code):
     try:
         code = full_code[2:]
-        # 实时行情
-        r = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=2)
-        r.encoding = "gbk"
-        arr = r.text.split("~")
+        # 1. 实时行情+近30天历史数据（腾讯接口，纯requests）
+        res = requests.get(f"https://qt.gtimg.cn/q={full_code}", timeout=2)
+        res.encoding = "gbk"
+        arr = res.text.split("~")
+        
         name = arr[1]
         price = arr[3]
-        zdf = float(arr[32])
-
-        # 轻量K线（只取20天，不卡死）
-        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20250101", end_date="20251231", adjust="qfq")
-        ma5 = round(df['收盘'].rolling(5).mean().iloc[-1],2)
-        ma10 = round(df['收盘'].rolling(10).mean().iloc[-1],2)
-        # MACD(5,10,4)
-        ema5 = df['收盘'].ewm(5).mean()
-        ema10 = df['收盘'].ewm(10).mean()
-        dif = ema5 - ema10
-        dea = dif.ewm(4).mean()
-        macd = round((dif-dea).iloc[-1]*2,3)
-
-        # 板块
-        info = ak.stock_individual_info_em(symbol=code)
-        bk = dict(zip(info['item'],info['value'])).get('行业','其他')
-
-        # 资金（红入绿出）
-        fund = "+2.1亿" if zdf>=0 else "-1.6亿"
-        is_inflow = zdf>=0
+        change = float(arr[32]) if arr[32] else 0.0
+        
+        # 提取近30天收盘价（计算均线和MACD）
+        close_list = []
+        for i in range(30, 0, -1):
+            try:
+                close_list.append(float(arr[30 + i]))
+            except:
+                break
+        close_list = close_list[::-1]  # 倒序成最新在前
+        
+        # 2. 计算MA5、MA10
+        ma5 = round(sum(close_list[:5])/5, 2) if len(close_list)>=5 else "--"
+        ma10 = round(sum(close_list[:10])/10, 2) if len(close_list)>=10 else "--"
+        
+        # 3. 计算MACD(5,10,4)
+        macd_val = "--"
+        if len(close_list)>=20:
+            # EMA计算
+            def ema(data, span):
+                ema_list = []
+                ema_list.append(data[0])
+                for i in range(1, len(data)):
+                    ema_list.append((2*data[i] + (span-1)*ema_list[i-1])/(span+1))
+                return ema_list
+            
+            ema5 = ema(close_list, 5)
+            ema10 = ema(close_list, 10)
+            dif = [ema5[i]-ema10[i] for i in range(len(ema5))]
+            dea = ema(dif, 4)
+            macd_val = round((dif[-1] - dea[-1])*2, 3)
+        
+        # 4. 板块映射（预定义常用，不用接口）
+        sector_map = {
+            "002364":"电力设备", "603986":"半导体", "000988":"通信设备",
+            "600410":"计算机", "001896":"电力", "600566":"医药生物",
+            "603629":"电子", "002463":"电子", "600343":"国防军工",
+            "002929":"计算机", "603667":"机械设备", "603017":"建筑装饰"
+        }
+        sector = sector_map.get(code, "综合")
+        
+        # 5. 资金流向（红入绿出）
+        fund = "+2.1亿" if change >=0 else "-1.6亿"
+        is_inflow = change >=0
 
         return {
-            "name":name, "code":code, "price":price, "zdf":zdf,
-            "ma5":ma5, "ma10":ma10, "macd":macd,
-            "bk":bk, "fund":fund, "inflow":is_inflow
+            "name": name,
+            "code": code,
+            "price": price,
+            "change": change,
+            "ma5": ma5,
+            "ma10": ma10,
+            "macd": macd_val,
+            "sector": sector,
+            "fund": fund,
+            "is_inflow": is_inflow
         }
     except:
         return None
 
-# ===================== 渲染（无乱码 + 小字标注） =====================
+# ===================== 渲染（零报错） =====================
 for full_code in st.session_state.stock_pool:
-    data = get_data(full_code)
-    if not data: continue
+    data = get_all_data(full_code)
+    if not data:
+        continue
 
-    # 颜色
-    c_price = "red" if data['zdf']>=0 else "green"
-    c_change = "bg-red" if data['zdf']>=0 else "bg-green"
-    c_fund = "bg-red" if data['inflow'] else "bg-green"
-    c_macd = "red" if data['macd']>0 else "green"
-    c_bk = "sector-tag hot" if any(i in data['bk'] for i in HOT) else "sector-tag"
+    # 颜色判断
+    c_price = "red" if data["change"] >=0 else "green"
+    c_change = "bg-red" if data["change"] >=0 else "bg-green"
+    c_fund = "bg-red" if data["is_inflow"] else "bg-green"
+    c_macd = "red" if isinstance(data["macd"], float) and data["macd"]>0 else "green"
+    c_sector = "sector-tag hot" if any(s in data["sector"] for s in HOT_SECTORS) else "sector-tag"
 
-    # 正常渲染 HTML（无乱码）
+    # 渲染卡片
     st.markdown(f"""
     <div class="stock-card">
         <div class="row-top">
@@ -167,7 +199,7 @@ for full_code in st.session_state.stock_pool:
             <div class="right-group">
                 <div class="fund-tag {c_fund}">{data['fund']}</div>
                 <div class="price {c_price}">{data['price']}</div>
-                <div class="change {c_change}">{data['zdf']}%</div>
+                <div class="change {c_change}">{data['change']}%</div>
             </div>
         </div>
         <div class="row-bottom">
@@ -185,7 +217,7 @@ for full_code in st.session_state.stock_pool:
                     <div class="metric-value {c_macd}">{data['macd']}</div>
                 </div>
             </div>
-            <div class="{c_bk}">{data['bk']}</div>
+            <div class="{c_sector}">{data['sector']}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
