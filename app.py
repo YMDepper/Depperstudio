@@ -13,14 +13,14 @@ st.set_page_config(
 # 强制移动端适配
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
-# ✅ 官方自动刷新：1.5秒一次，稳定无死循环
-st_autorefresh(interval=1500, limit=None, key="auto_refresh_final")
+# ✅ 5秒自动刷新（仅触发局部数据更新，不闪屏）
+st_autorefresh(interval=5000, limit=None, key="local_refresh")
 
 # 初始化股票池
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sh600111", "sz002428", "sh600137"]
 
-# ===================== 2. iPhone专属UI样式（优化紧凑版） =====================
+# ===================== 2. 最终UI样式（卡片底色+无闪烁优化） =====================
 st.markdown("""
 <style>
     * {
@@ -62,23 +62,25 @@ st.markdown("""
     }
     .stButton button:hover {background-color: #3a3a3c !important;}
 
-    /* ✅ 优化卡片高度，移除诊断框后更紧凑 */
+    /* ✅ 独立卡片底色+阴影+圆角，视觉强区分 */
     .stock-card {
         position: relative;
         width: 100% !important;
-        border-radius: 20px;
-        background-color: #17171a;
-        padding: 20px 16px 12px 16px;
-        margin-bottom: 16px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        background-color: #1c1c1e;  /* 比主背景亮一级的卡片底色 */
+        border-radius: 16px;
+        padding: 18px 16px 14px 16px;
+        margin-bottom: 12px !important;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
     }
 
+    /* 左侧信号边（和卡片等高） */
     .signal-border {
         position: absolute;
         top: 0;
         left: 0;
         width: 6px;
         height: 100%;
+        border-radius: 16px 0 0 16px;
         z-index: 1;
     }
     .signal-buy {background: linear-gradient(180deg, #ff3b30, #ff2d55);}
@@ -90,6 +92,7 @@ st.markdown("""
         align-items: flex-start;
         width: 100%;
         margin-bottom: 16px;
+        padding-left: 10px; /* 给左侧信号边留空间 */
         padding-right: 50px;
     }
 
@@ -155,6 +158,7 @@ st.markdown("""
         grid-template-columns: repeat(4, 1fr);
         gap: 8px;
         width: 100%;
+        padding-left: 10px; /* 和头部对齐 */
     }
     .metric-item {
         display: flex;
@@ -201,7 +205,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== 3. 顶部搜索栏 =====================
+# ===================== 3. 顶部固定区域（永远不刷新，彻底解决闪烁） =====================
 st.title("📈 鹰眼MRI · 股票卡片对比系统")
 col_input, col_clear = st.columns([0.8, 0.2])
 with col_input:
@@ -225,7 +229,7 @@ with col_clear:
 
 st.divider()
 
-# ===================== 4. 数据获取（HTTPS稳定版） =====================
+# ===================== 4. 数据获取 =====================
 @st.cache_data(ttl=3)
 def get_stock_data(code):
     try:
@@ -265,63 +269,65 @@ def get_stock_data(code):
     except:
         return None
 
-# ===================== 5. 股票卡片渲染（无诊断推演版） =====================
-for stock_code in st.session_state.stock_pool:
-    stock_info = get_stock_data(stock_code)
-    if not stock_info:
-        st.warning(f"⚠️ {stock_code} 数据获取失败，请检查代码")
-        continue
-    
-    is_up = stock_info["change"] >= 0
-    text_color = "up-color" if is_up else "down-color"
-    signal_class = "signal-buy" if stock_info["is_buy"] else "signal-sell"
-    
-    with st.container():
-        st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
-        st.markdown(f'<div class="signal-border {signal_class}"></div>', unsafe_allow_html=True)
+# ===================== 5. ✅ 局部数据刷新容器（只有这里会更新，完全不闪） =====================
+data_container = st.empty()
+
+with data_container.container():
+    for stock_code in st.session_state.stock_pool:
+        stock_info = get_stock_data(stock_code)
+        if not stock_info:
+            st.warning(f"⚠️ {stock_code} 数据获取失败，请检查代码")
+            continue
         
-        if st.button("✕", key=f"del_{stock_code}"):
-            st.session_state.stock_pool.remove(stock_code)
-            st.rerun()
+        is_up = stock_info["change"] >= 0
+        text_color = "up-color" if is_up else "down-color"
+        signal_class = "signal-buy" if stock_info["is_buy"] else "signal-sell"
         
-        st.markdown(f"""
-        <div class="card-header">
-            <div class="header-left">
-                <div class="name-row">
-                    <span class="score-badge">评分 {stock_info['score']}</span>
-                    <span class="stock-name">{stock_info['name']}</span>
+        with st.container():
+            st.markdown(f'<div class="stock-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="signal-border {signal_class}"></div>', unsafe_allow_html=True)
+            
+            if st.button("✕", key=f"del_{stock_code}"):
+                st.session_state.stock_pool.remove(stock_code)
+                st.rerun()
+            
+            st.markdown(f"""
+            <div class="card-header">
+                <div class="header-left">
+                    <div class="name-row">
+                        <span class="score-badge">评分 {stock_info['score']}</span>
+                        <span class="stock-name">{stock_info['name']}</span>
+                    </div>
+                    <div class="stock-code">{stock_info['short_code']}</div>
                 </div>
-                <div class="stock-code">{stock_info['short_code']}</div>
+                <div class="header-right">
+                    <div class="main-price {text_color}">{stock_info['price']}</div>
+                    <div class="price-change {text_color}">{stock_info['change']}%</div>
+                </div>
             </div>
-            <div class="header-right">
-                <div class="main-price {text_color}">{stock_info['price']}</div>
-                <div class="price-change {text_color}">{stock_info['change']}%</div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <div class="metric-value {text_color}">{stock_info['open_premium']}%</div>
+                    <div class="metric-label">开盘溢价</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value up-color">{stock_info['intraday_entity']}%</div>
+                    <div class="metric-label">盘中实体</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value">{stock_info['high_price']}</div>
+                    <div class="metric-label">今日最高</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value up-color">{stock_info['target_price']}</div>
+                    <div class="metric-label">目标价</div>
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # ✅ 指标网格（4列，更紧凑）
-        st.markdown(f"""
-        <div class="metrics-grid">
-            <div class="metric-item">
-                <div class="metric-value {text_color}">{stock_info['open_premium']}%</div>
-                <div class="metric-label">开盘溢价</div>
-            </div>
-            <div class="metric-item">
-                <div class="metric-value up-color">{stock_info['intraday_entity']}%</div>
-                <div class="metric-label">盘中实体</div>
-            </div>
-            <div class="metric-item">
-                <div class="metric-value">{stock_info['high_price']}</div>
-                <div class="metric-label">今日最高</div>
-            </div>
-            <div class="metric-item">
-                <div class="metric-value up-color">{stock_info['target_price']}</div>
-                <div class="metric-label">目标价</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div style="height: 80px;"></div>', unsafe_allow_html=True)
