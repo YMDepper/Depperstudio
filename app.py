@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-from streamlit_autorefresh import st_autorefresh
 
 # ===================== 1. 全局配置（iPhone专属优化） =====================
 st.set_page_config(
@@ -13,8 +12,11 @@ st.set_page_config(
 # 强制移动端视口适配，解决Safari缩放问题
 st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
-# 自动刷新：5秒一次，兼顾实时性和手机性能
-st_autorefresh(interval=5000, limit=None, key="iphone_fix_final")
+# 原生自动刷新：5秒一次，无第三方依赖
+st.components.v1.html(
+    """<script>setInterval(() => window.parent.location.reload(), 5000)</script>""",
+    height=0
+)
 
 # 初始化股票池
 if 'stock_pool' not in st.session_state:
@@ -309,7 +311,7 @@ with col_clear:
         st.rerun()
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ===================== 4. 数据获取函数（稳定容错） =====================
+# ===================== 4. 数据获取函数（腾讯接口，极速稳定） =====================
 @st.cache_data(ttl=3)
 def get_stock_data(code):
     try:
@@ -334,7 +336,7 @@ def get_stock_data(code):
         target_price = round(yesterday_close * 1.1, 2)
         wr_index = 39.1
         
-        # 买入/卖出信号判断（可自定义你的逻辑）
+        # 买入/卖出信号判断
         is_buy_signal = change_percent >= 0
         
         return {
