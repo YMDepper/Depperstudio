@@ -6,12 +6,11 @@ from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=1000, limit=None, key="fix_top_input")
+st_autorefresh(interval=1000, limit=None, key="fix_top_final")
 
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sh601899", "sz001896", "sz002364", "sh600111"]
 
-# 初始化输入框清空状态
 if "clear_input" not in st.session_state:
     st.session_state.clear_input = False
 
@@ -20,13 +19,13 @@ STOCK_PY_MAP = {
     "ynzy":"sz002428", "gxgk":"sz002074", "lymy":"sh603993", "xlyy":"sz002842"
 }
 
-# ===================== 修复：顶部留白 + 输入框不遮挡 =====================
+# ===================== 核心修复：大幅增加顶部留白 =====================
 st.markdown("""
 <style>
     .stApp { background:#020408; }
     #MainMenu,header,footer {display:none;}
-    /* 关键：增加顶部内边距，解决输入框被遮挡 */
-    .block-container {padding: 20px 8px 6px 8px!important; max-width:800px;}
+    /* 关键：顶部直接加 60px 留白，彻底解决遮挡 */
+    .block-container {padding: 60px 8px 6px 8px!important; max-width:800px;}
     [data-testid="stVerticalBlock"] {gap:0px!important;}
     .stButton>button {background:none!important; border:none!important; color:#555!important; font-size:16px!important; padding:0!important;}
 
@@ -50,10 +49,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== 搜索框（自动清空 + 不遮挡） =====================
+# ===================== 搜索框（自动清空） =====================
 a1,a2 = st.columns([0.9,0.1])
 with a1:
-    # 自动清空逻辑
     if st.session_state.clear_input:
         inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed", value="")
         st.session_state.clear_input = False
@@ -64,16 +62,15 @@ with a2:
         st.session_state.stock_pool=[]
         st.rerun()
 
-# 输入添加股票 + 自动清空
 if inp:
     s=inp.strip().lower()
     c="sh"+s if s.isdigit() and s[0] in '69' else "sz"+s if s.isdigit() else STOCK_PY_MAP.get(s)
     if c and c not in st.session_state.stock_pool:
         st.session_state.stock_pool.insert(0,c)
-        st.session_state.clear_input = True  # 标记清空
+        st.session_state.clear_input = True
         st.rerun()
 
-# ===================== 全标签库（1:1 腾讯行业+概念） =====================
+# ===================== 全标签库 =====================
 FULL_TAG_MAP = {
     "601899": {"s":"有色金属","t":["黄金","稀缺资源","AH股"],"m":"矿产开发"},
     "001896": {"s":"电力","t":["绿电","风电","盐业"],"m":"电力生产"},
@@ -85,18 +82,16 @@ FULL_TAG_MAP = {
     "002842": {"s":"有色金属","t":["钨","小金属","稀土"],"m":"钨钼制品"}
 }
 
-# ===================== 数据（真实资金 + 精准MACD 5,10,4） =====================
+# ===================== 数据 =====================
 @st.cache_data(ttl=10, show_spinner=False)
 def load(code):
     try:
-        # 1. 基础行情
         r=requests.get(f"https://qt.gtimg.cn/q={code}", timeout=2)
         r.encoding='gbk'
         arr=r.text.split("~")
         name,px,zdf=arr[1],float(arr[3]),float(arr[32]or 0)
         lc,op=float(arr[4]),float(arr[5])
 
-        # 2. 日K（60根保证MACD精准）
         kr=requests.get(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},day,,,60,qfq", timeout=2)
         kd=kr.json()['data'][code]['qfqday']
         cl=[float(x[2]) for x in kd]
@@ -104,7 +99,6 @@ def load(code):
         ma10=round(sum(cl[-10:])/10,2)
         prem=round((op-lc)/lc*100,2)
 
-        # 3. 精准MACD(5,10,4)
         def ema_standard(series, span):
             alpha=2/(span+1)
             ema=[series[0]]
@@ -120,7 +114,6 @@ def load(code):
         death=(dif[-1]<dea[-1])&(dif[-2]>=dea[-2])
         df=pd.DataFrame({'dif':dif[-15:],'dea':dea[-15:],'macd':macd[-15:]})
 
-        # 4. 真实当日主力净流入（腾讯接口，万元→亿）
         try:
             fund_json=requests.get(f"https://web.ifzq.gtimg.cn/stock/asset/getFundFlow?code={code}", timeout=2).json()
             net_in=float(fund_json['data']['main_net'])
@@ -132,7 +125,6 @@ def load(code):
         fund_cls="#ef4444" if "+" in fund_txt else "#22c55e"
         pct_bg="rgba(239,68,68,.15)" if zdf>=0 else "rgba(34,197,94,.15)"
 
-        # 5. 标签
         info=FULL_TAG_MAP.get(code[2:],{"s":"全市场","t":["核心资产"],"m":"主营"})
 
         return {
@@ -144,7 +136,7 @@ def load(code):
     except Exception as e:
         return None
 
-# ===================== 渲染（一行左右并排，终极对齐） =====================
+# ===================== 渲染 =====================
 for code in st.session_state.stock_pool:
     d=load(code)
     if not d: continue
@@ -178,7 +170,6 @@ for code in st.session_state.stock_pool:
                 st.session_state.stock_pool.remove(code)
                 st.rerun()
 
-        # MACD（红绿柱完全按正负）
         macd_colors=["#ef4444" if v>0 else "#22c55e" for v in d["df"]["macd"]]
         fig=go.Figure()
         fig.add_trace(go.Scatter(y=d["df"]["dif"], line=dict(color='#888', width=1)))
@@ -190,7 +181,6 @@ for code in st.session_state.stock_pool:
         fig.update_layout(height=38, margin=dict(l=0,r=0,t=0,b=0), showlegend=False, xaxis_visible=False, yaxis_visible=False, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode=False, dragmode=False)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False, "staticPlot":True})
 
-        # 底部小字
         st.markdown(f"""
         <div style="font-size:9px; color:#64748b; text-align:center; margin-top:-6px;">
             MA5:{d['ma5']}  MA10:{d['ma10']}  溢价:<span style="color:{color_main};">{d['prem']}%</span>
