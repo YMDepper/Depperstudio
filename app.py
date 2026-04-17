@@ -6,22 +6,27 @@ from streamlit_autorefresh import st_autorefresh
 
 # ===================== 全局 =====================
 st.set_page_config(page_title="鹰眼自选", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=10000, limit=None, key="fix_all_now")
+st_autorefresh(interval=1000, limit=None, key="fix_top_input")
 
 if 'stock_pool' not in st.session_state:
     st.session_state.stock_pool = ["sh601899", "sz001896", "sz002364", "sh600111"]
+
+# 初始化输入框清空状态
+if "clear_input" not in st.session_state:
+    st.session_state.clear_input = False
 
 STOCK_PY_MAP = {
     "zjky":"sh601899", "ynnt":"sz001896", "zhdq":"sz002364", "bfxt":"sh600111",
     "ynzy":"sz002428", "gxgk":"sz002074", "lymy":"sh603993", "xlyy":"sz002842"
 }
 
-# ===================== 强制一行对齐 CSS =====================
+# ===================== 修复：顶部留白 + 输入框不遮挡 =====================
 st.markdown("""
 <style>
     .stApp { background:#020408; }
     #MainMenu,header,footer {display:none;}
-    .block-container {padding:6px 8px!important; max-width:800px;}
+    /* 关键：增加顶部内边距，解决输入框被遮挡 */
+    .block-container {padding: 20px 8px 6px 8px!important; max-width:800px;}
     [data-testid="stVerticalBlock"] {gap:0px!important;}
     .stButton>button {background:none!important; border:none!important; color:#555!important; font-size:16px!important; padding:0!important;}
 
@@ -45,15 +50,28 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== 搜索 =====================
+# ===================== 搜索框（自动清空 + 不遮挡） =====================
 a1,a2 = st.columns([0.9,0.1])
-with a1: inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed")
+with a1:
+    # 自动清空逻辑
+    if st.session_state.clear_input:
+        inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed", value="")
+        st.session_state.clear_input = False
+    else:
+        inp = st.text_input("", placeholder="🔍 代码/首字母", label_visibility="collapsed")
 with a2:
-    if st.button("清空"): st.session_state.stock_pool=[]; st.rerun()
+    if st.button("清空"): 
+        st.session_state.stock_pool=[]
+        st.rerun()
+
+# 输入添加股票 + 自动清空
 if inp:
     s=inp.strip().lower()
     c="sh"+s if s.isdigit() and s[0] in '69' else "sz"+s if s.isdigit() else STOCK_PY_MAP.get(s)
-    if c and c not in st.session_state.stock_pool: st.session_state.stock_pool.insert(0,c); st.rerun()
+    if c and c not in st.session_state.stock_pool:
+        st.session_state.stock_pool.insert(0,c)
+        st.session_state.clear_input = True  # 标记清空
+        st.rerun()
 
 # ===================== 全标签库（1:1 腾讯行业+概念） =====================
 FULL_TAG_MAP = {
@@ -157,7 +175,8 @@ for code in st.session_state.stock_pool:
             """, unsafe_allow_html=True)
         with wrap[1]:
             if st.button("×", key=f"x_{code}"):
-                st.session_state.stock_pool.remove(code); st.rerun()
+                st.session_state.stock_pool.remove(code)
+                st.rerun()
 
         # MACD（红绿柱完全按正负）
         macd_colors=["#ef4444" if v>0 else "#22c55e" for v in d["df"]["macd"]]
